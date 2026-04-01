@@ -42,6 +42,12 @@ createServer(async (req, res) => {
     const rawPath = decodeURIComponent(requestUrl.pathname);
     const hasFileExtension = path.extname(rawPath) !== '';
 
+    if (rawPath === '/__app-check') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, app: 'wbiz-frontend', mode: 'node-spa-server' }));
+      return;
+    }
+
     if (rawPath !== '/' && !rawPath.endsWith('/') && !hasFileExtension && !rawPath.startsWith('/api/')) {
       const redirectTo = `${rawPath}/${requestUrl.search}`;
       res.writeHead(308, { Location: redirectTo });
