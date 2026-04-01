@@ -36,11 +36,11 @@ function LoadingScreen() {
 function ProtectedRoute({ children, requiredStatus }) {
   const { isAuthenticated, user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <Navigate to="/login/" replace />;
   if (requiredStatus && user?.status !== requiredStatus) {
-    if (user?.status === 'pending_verification') return <Navigate to="/login" replace />;
-    if (user?.status === 'pending_setup') return <Navigate to="/portal/setup" replace />;
-    if (user?.status === 'active') return <Navigate to="/portal/dashboard" replace />;
+    if (user?.status === 'pending_verification') return <Navigate to="/login/" replace />;
+    if (user?.status === 'pending_setup') return <Navigate to="/portal/setup/" replace />;
+    if (user?.status === 'active') return <Navigate to="/portal/dashboard/" replace />;
   }
   return children;
 }
@@ -49,8 +49,8 @@ function PublicRoute({ children }) {
   const { isAuthenticated, user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (isAuthenticated) {
-    if (user?.status === 'pending_setup') return <Navigate to="/portal/setup" replace />;
-    if (user?.status === 'active') return <Navigate to="/portal/dashboard" replace />;
+    if (user?.status === 'pending_setup') return <Navigate to="/portal/setup/" replace />;
+    if (user?.status === 'active') return <Navigate to="/portal/dashboard/" replace />;
   }
   return children;
 }
@@ -60,8 +60,10 @@ export default function App() {
   if (loading) return <LoadingScreen />;
   return (
     <Routes>
-      <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-      <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+      <Route path="/register" element={<Navigate to="/register/" replace />} />
+      <Route path="/login" element={<Navigate to="/login/" replace />} />
+      <Route path="/register/" element={<PublicRoute><Register /></PublicRoute>} />
+      <Route path="/login/" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
       <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
@@ -83,8 +85,8 @@ export default function App() {
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Route>
-      <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      <Route path="/" element={<Navigate to="/login/" replace />} />
+      <Route path="*" element={<Navigate to="/login/" replace />} />
     </Routes>
   );
 }

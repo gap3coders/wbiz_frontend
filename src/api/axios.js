@@ -89,7 +89,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         localStorage.removeItem('access_token');
-        window.location.href = '/login';
+        window.location.href = '/login/';
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

@@ -40,6 +40,15 @@ createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url || '/', 'http://localhost');
     const rawPath = decodeURIComponent(requestUrl.pathname);
+    const hasFileExtension = path.extname(rawPath) !== '';
+
+    if (rawPath !== '/' && !rawPath.endsWith('/') && !hasFileExtension && !rawPath.startsWith('/api/')) {
+      const redirectTo = `${rawPath}/${requestUrl.search}`;
+      res.writeHead(308, { Location: redirectTo });
+      res.end();
+      return;
+    }
+
     const relativePath = rawPath === '/' ? 'index.html' : rawPath.slice(1);
     const safePath = path.normalize(path.join(distDir, relativePath));
 
