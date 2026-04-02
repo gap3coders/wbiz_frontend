@@ -54,7 +54,8 @@ const relativeTime = (value) => {
 const formatTime = (value) =>
   value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
-const conversationName = (item) => item?.contact_name || item?.wa_name || item?.name || item?.contact_phone || 'Unknown';
+const conversationName = (item) => item?.name || item?.contact_name || item?.wa_name || item?.contact_phone || 'N/A';
+const displayName = (item = {}) => item?.name || item?.contact_name || item?.wa_name || item?.contact_phone || 'N/A';
 const MEDIA_TYPES = new Set(['image', 'document', 'video', 'audio']);
 const TEMPLATE_PATTERN = /^\[Template:\s*(.+?)\]$/i;
 
@@ -324,7 +325,7 @@ export default function Inbox() {
 
   const selectedConversation = conversations.find((item) => item.contact_phone === selectedPhone) || null;
   const currentDisplayName =
-    contact?.wa_name || contact?.name || selectedConversation?.contact_name || selectedConversation?.contact_phone || selectedPhone;
+    contact?.name || contact?.wa_name || selectedConversation?.name || selectedConversation?.contact_name || selectedConversation?.contact_phone || selectedPhone || 'N/A';
   const currentAvatarTheme = getAvatarTheme(currentDisplayName);
   const requestedPhone = String(searchParams.get('phone') || '').replace(/[^\d]/g, '');
 
@@ -1225,7 +1226,7 @@ export default function Inbox() {
                   </div>
                   <p className="text-base font-semibold text-gray-900">{contact?.wa_name || contact?.name || 'Unknown'}</p>
                   {contact?.wa_name && contact?.name && contact.wa_name !== contact.name ? <p className="text-xs text-gray-400">Saved as: {contact.name}</p> : null}
-                  <p className="text-sm text-gray-500">+{selectedPhone}</p>
+                  <p className="text-sm text-gray-500">{selectedPhone ? `+${selectedPhone}` : 'N/A'}</p>
                   {contact?.wa_exists === 'yes' ? <span className={`mt-1 rounded-full border px-2.5 py-1 text-[10px] font-bold ${currentAvatarTheme.accent}`}>Available on WhatsApp</span> : null}
                   {contact?.wa_exists === 'no' ? <span className="mt-1 px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-600 rounded-full">Not on WhatsApp</span> : null}
                 </div>

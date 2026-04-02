@@ -16,13 +16,13 @@ export default function Campaigns() {
   const [contacts, setContacts] = useState([]);
   const [allLabels, setAllLabels] = useState([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{}});
+  const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
 
   const fetch_ = async () => { setLoading(true); try { const {data}=await api.get('/campaigns'); setCampaigns(data.data.campaigns||[]); } catch(e){toast.error('Failed');} finally{setLoading(false);} };
   useEffect(()=>{fetch_();},[]);
 
   const openWiz = async () => {
-    setShowCreate(true); setStep(1); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{}});
+    setShowCreate(true); setStep(1); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
     try {
       const [t,c] = await Promise.all([api.get('/meta/templates'), api.get('/contacts',{params:{limit:500}})]);
       setTemplates((t.data.data.templates||[]).filter(t=>t.status==='APPROVED'));
@@ -51,6 +51,14 @@ export default function Campaigns() {
     }
     return vars;
   };
+
+  const selectedTemplate = templates.find((item) => item.name === form.template_name) || null;
+  const headerMediaFormat = (() => {
+    const header = (selectedTemplate?.components || []).find((component) => String(component.type || '').toUpperCase() === 'HEADER');
+    const format = String(header?.format || '').toUpperCase();
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) return '';
+    return format.toLowerCase();
+  })();
 
   const variableConfigFor = (tokenKey) => {
     const current = form.variable_mapping?.[tokenKey];
@@ -87,9 +95,27 @@ export default function Campaigns() {
         return;
       }
     }
+    if (headerMediaFormat && !String(form.header_media_url || '').trim()) {
+      toast.error(`Template requires ${headerMediaFormat.toUpperCase()} header media URL`);
+      return;
+    }
     setCreating(true);
     try {
-      const { data } = await api.post('/campaigns',form);
+      const payload = {
+        ...form,
+        template_components: headerMediaFormat && form.header_media_url?.trim()
+          ? [{
+              type: 'header',
+              parameters: [
+                {
+                  type: headerMediaFormat,
+                  [headerMediaFormat]: { link: form.header_media_url.trim() },
+                },
+              ],
+            }]
+          : [],
+      };
+      const { data } = await api.post('/campaigns',payload);
       if (data?.data?.launch === 'started') toast.success('Campaign published and started now.');
       else toast.success('Campaign scheduled successfully.');
       setShowCreate(false);
@@ -167,8 +193,19 @@ export default function Campaigns() {
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Select Meta-Approved Template</label>
               {templates.length===0?<p className="text-sm text-gray-400 text-center py-8">No approved templates</p>
               :<div className="space-y-2 max-h-60 overflow-y-auto">{templates.map(t=>{const vars=extractVars(t.name);return(
-                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{}});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
+                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{},template_components:[],header_media_url:''});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
               )})}</div>}
+              {headerMediaFormat ? (
+                <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <p className="text-xs font-semibold text-blue-700 mb-2">Header Media ({headerMediaFormat.toUpperCase()})</p>
+                  <input
+                    value={form.header_media_url || ''}
+                    onChange={(event) => setForm((prev) => ({ ...prev, header_media_url: event.target.value }))}
+                    placeholder={`Public ${headerMediaFormat} URL`}
+                    className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              ) : null}
               {form.template_name && extractVars(form.template_name).length>0 && (
                 <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
                   <p className="text-xs font-semibold text-amber-700 mb-2">Template Variables</p>
