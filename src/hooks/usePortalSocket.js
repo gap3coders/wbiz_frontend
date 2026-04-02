@@ -20,6 +20,7 @@ export default function usePortalSocket({
   onConversationUpdated,
   onMessageStatus,
   onConnected,
+  onCampaignProgress,
 }) {
   useEffect(() => {
     if (!enabled) return undefined;
@@ -45,11 +46,16 @@ export default function usePortalSocket({
       socket.on('message:status', onMessageStatus);
     }
 
+    if (onCampaignProgress) {
+      socket.on('campaign:progress', onCampaignProgress);
+    }
+
     return () => {
       if (onConnected) socket.off('portal:connected', onConnected);
       if (onConversationUpdated) socket.off('conversation:updated', onConversationUpdated);
       if (onMessageStatus) socket.off('message:status', onMessageStatus);
+      if (onCampaignProgress) socket.off('campaign:progress', onCampaignProgress);
       socket.disconnect();
     };
-  }, [enabled, onConnected, onConversationUpdated, onMessageStatus]);
+  }, [enabled, onConnected, onConversationUpdated, onMessageStatus, onCampaignProgress]);
 }

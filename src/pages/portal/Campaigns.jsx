@@ -18,8 +18,26 @@ export default function Campaigns() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
 
-  const fetch_ = async () => { setLoading(true); try { const {data}=await api.get('/campaigns'); setCampaigns(data.data.campaigns||[]); } catch(e){toast.error('Failed');} finally{setLoading(false);} };
+  const fetch_ = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const {data}=await api.get('/campaigns');
+      setCampaigns(data.data.campaigns||[]);
+    } catch(e){
+      if (!silent) toast.error('Failed');
+    } finally{
+      if (!silent) setLoading(false);
+    }
+  };
   useEffect(()=>{fetch_();},[]);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      fetch_(true);
+      if (showDetail) fetchDetail(showDetail);
+    }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [showDetail]);
 
   const openWiz = async () => {
     setShowCreate(true); setStep(1); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
@@ -128,6 +146,10 @@ export default function Campaigns() {
     if(!window.confirm('Launch? Messages sent via Meta API immediately.')) return;
     try { await api.post(`/campaigns/${id}/launch`); toast.success('Launched!'); fetch_(); } catch(e){toast.error('Failed');}
   };
+  const rerun = async id => {
+    if(!window.confirm('Rerun this campaign now?')) return;
+    try { await api.post(`/campaigns/${id}/rerun`); toast.success('Rerun started'); fetch_(); } catch(e){toast.error('Failed');}
+  };
 
   const del = async id => { if(!window.confirm('Delete?')) return; try { await api.delete(`/campaigns/${id}`); toast.success('Deleted'); if(showDetail===id) setShowDetail(null); fetch_(); } catch(e){toast.error('Failed');} };
   const toggle = p => setForm(f=>({...f,recipients:f.recipients.includes(p)?f.recipients.filter(x=>x!==p):[...f.recipients,p]}));
@@ -147,7 +169,7 @@ export default function Campaigns() {
       : <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{campaigns.map(c=>{const cfg=SC[c.status]||SC.draft;const SI=cfg.icon;const total=c.stats?.total||0;const sent=c.stats?.sent||0;const pct=total>0?Math.round((sent/total)*100):0;return(
         <div key={c._id} className="bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-md transition-all animate-fade-in-up">
           <div className="flex items-start justify-between mb-3"><div><h3 className="text-sm font-bold text-gray-900 mb-1">{c.name}</h3><span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${cfg.color}`}><SI className="w-3 h-3"/>{c.status}</span></div>
-            <div className="flex gap-1">{['draft','scheduled','paused'].includes(c.status)&&<button onClick={()=>launch(c._id)} className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg" title="Launch"><Play className="w-4 h-4"/></button>}<button onClick={()=>fetchDetail(c._id)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg" title="Details"><Eye className="w-4 h-4"/></button>{['draft','completed','failed'].includes(c.status)&&<button onClick={()=>del(c._id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>}</div>
+            <div className="flex gap-1">{['draft','scheduled','paused'].includes(c.status)&&<button onClick={()=>launch(c._id)} className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg" title="Launch"><Play className="w-4 h-4"/></button>}<button onClick={()=>fetchDetail(c._id)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg" title="Details"><Eye className="w-4 h-4"/></button><button onClick={()=>rerun(c._id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Rerun"><RefreshCw className="w-4 h-4"/></button>{['draft','completed','failed'].includes(c.status)&&<button onClick={()=>del(c._id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>}</div>
           </div>
           <div className="text-xs text-gray-400 mb-1">Template: <span className="font-medium text-gray-600">{c.template_name}</span></div>
           {c.target_type==='tags'&&<div className="text-xs text-gray-400 mb-1">Tags: {(c.target_tags||[]).map(t=><span key={t} className="inline-block px-1.5 py-0.5 bg-violet-50 text-violet-700 text-[9px] font-bold rounded mr-1">{t}</span>)}</div>}
