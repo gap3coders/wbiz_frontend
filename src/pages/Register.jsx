@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
 import { Eye, EyeOff, CheckCircle2, XCircle, Loader2, ArrowRight, MessageSquare } from 'lucide-react';
+import { COUNTRY_PHONE_OPTIONS, detectDefaultCountryOption, parsePhoneInput } from '../utils/phone';
 
 const INDUSTRIES = [
   'E-commerce', 'Healthcare', 'Finance', 'Education', 'Real Estate',
@@ -28,8 +29,9 @@ export default function Register() {
 
   const [form, setForm] = useState({
     full_name: '', email: '', password: '', confirm_password: '',
-    phone: '', company_name: '', country: 'India', industry: '',
-    whatsapp_number: '', terms: false,
+    phone: '', phone_country_code: '91', phone_number: '',
+    company_name: '', country: 'India', industry: '',
+    whatsapp_number: '', whatsapp_country_code: '91', whatsapp_phone_number: '', terms: false,
   });
 
   const handleChange = (e) => {
@@ -81,9 +83,32 @@ export default function Register() {
     if (!form.terms) return toast.error('Please accept the Terms of Service');
     if (form.password !== form.confirm_password) return toast.error('Passwords do not match');
 
+    const parsedPhone = parsePhoneInput({
+      phone: form.phone,
+      country_code: form.phone_country_code,
+      phone_number: form.phone_number,
+      default_country_code: form.phone_country_code || '91',
+    });
+    if (!parsedPhone.ok) return toast.error(parsedPhone.error);
+
+    const parsedWhatsApp = form.whatsapp_phone_number || form.whatsapp_number
+      ? parsePhoneInput({
+          phone: form.whatsapp_number,
+          country_code: form.whatsapp_country_code,
+          phone_number: form.whatsapp_phone_number,
+          default_country_code: form.whatsapp_country_code || form.phone_country_code || '91',
+        })
+      : null;
+    if (parsedWhatsApp && !parsedWhatsApp.ok) return toast.error(`WhatsApp number: ${parsedWhatsApp.error}`);
+
     setLoading(true);
     try {
-      const result = await register(form);
+      const payload = {
+        ...form,
+        phone: parsedPhone.phone,
+        whatsapp_number: parsedWhatsApp?.phone || '',
+      };
+      const result = await register(payload);
       toast.success('Account created! Check your email to verify.');
       navigate('/login', { state: { registered: true, email: form.email } });
     } catch (err) {
@@ -92,6 +117,21 @@ export default function Register() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    detectDefaultCountryOption().then((option) => {
+      if (!mounted || !option) return;
+      setForm((current) => ({
+        ...current,
+        phone_country_code: current.phone_country_code || option.dialCode,
+        whatsapp_country_code: current.whatsapp_country_code || option.dialCode,
+      }));
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="min-h-screen flex">
@@ -199,8 +239,22 @@ export default function Register() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone number *</label>
-                <input name="phone" type="tel" value={form.phone} onChange={handleChange} required
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="+91 98765 43210" />
+                <div className="grid grid-cols-[150px,1fr] gap-2">
+                  <select
+                    name="phone_country_code"
+                    value={form.phone_country_code}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300"
+                  >
+                    {COUNTRY_PHONE_OPTIONS.map((option) => (
+                      <option key={`${option.iso2}-${option.dialCode}`} value={option.dialCode}>
+                        {option.country} (+{option.dialCode})
+                      </option>
+                    ))}
+                  </select>
+                  <input name="phone_number" type="tel" value={form.phone_number} onChange={(event) => setForm((prev) => ({ ...prev, phone_number: event.target.value.replace(/[^\d]/g, ''), phone: `${prev.phone_country_code}${event.target.value.replace(/[^\d]/g, '')}` }))} required
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="9876543210" />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Company name *</label>
@@ -231,8 +285,22 @@ export default function Register() {
             {/* WhatsApp number (optional) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">WhatsApp Business number <span className="text-gray-400">(optional)</span></label>
-              <input name="whatsapp_number" type="tel" value={form.whatsapp_number} onChange={handleChange}
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="+91 98765 43210" />
+              <div className="grid grid-cols-[150px,1fr] gap-2">
+                <select
+                  name="whatsapp_country_code"
+                  value={form.whatsapp_country_code}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300"
+                >
+                  {COUNTRY_PHONE_OPTIONS.map((option) => (
+                    <option key={`wa-${option.iso2}-${option.dialCode}`} value={option.dialCode}>
+                      {option.country} (+{option.dialCode})
+                    </option>
+                  ))}
+                </select>
+                <input name="whatsapp_phone_number" type="tel" value={form.whatsapp_phone_number} onChange={(event) => setForm((prev) => ({ ...prev, whatsapp_phone_number: event.target.value.replace(/[^\d]/g, ''), whatsapp_number: `${prev.whatsapp_country_code}${event.target.value.replace(/[^\d]/g, '')}` }))}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="9876543210" />
+              </div>
             </div>
 
             {/* Terms */}

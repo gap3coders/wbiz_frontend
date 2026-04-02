@@ -1,10 +1,11 @@
-﻿import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import PortalModal from '../../components/Portal/PortalModal';
 import MediaLibraryModal from '../../MediaLibraryModal';
 import ContactImportWizard from '../../ContactImportWizard';
 import { detectMediaAssetType, formatFileSize } from '../../mediaLibraryHelpers';
+import { COUNTRY_PHONE_OPTIONS, detectDefaultCountryOption, formatDisplayPhone, parsePhoneInput, splitCombinedPhone } from '../../utils/phone';
 import {
   Users,
   Plus,
@@ -97,7 +98,8 @@ export default function Contacts() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showSend, setShowSend] = useState(false);
-  const [form, setForm] = useState({ phone: '', name: '', email: '', labels: '', notes: '' });
+  const [form, setForm] = useState({ country_code: '91', phone_number: '', phone: '', name: '', email: '', labels: '', notes: '' });
+  const [defaultCountryOption, setDefaultCountryOption] = useState(COUNTRY_PHONE_OPTIONS[0]);
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [sendMode, setSendMode] = useState('text');
@@ -152,6 +154,21 @@ export default function Contacts() {
   }, [fetchContacts]);
 
   useEffect(() => {
+    let mounted = true;
+    detectDefaultCountryOption().then((option) => {
+      if (!mounted || !option) return;
+      setDefaultCountryOption(option);
+      setForm((current) => {
+        if (current.country_code) return current;
+        return { ...current, country_code: option.dialCode };
+      });
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showSend || sendMode !== 'template' || templates.length) return;
     setLoadingTemplates(true);
     api
@@ -186,13 +203,24 @@ export default function Contacts() {
 
   const openAddModal = () => {
     setEditId(null);
-    setForm({ phone: '', name: '', email: '', labels: '', notes: '' });
+    setForm({
+      country_code: defaultCountryOption?.dialCode || '91',
+      phone_number: '',
+      phone: '',
+      name: '',
+      email: '',
+      labels: '',
+      notes: '',
+    });
     setShowAdd(true);
   };
 
   const openEditModal = (contact) => {
+    const split = splitCombinedPhone(contact.phone || '', defaultCountryOption?.dialCode || '91');
     setEditId(contact._id);
     setForm({
+      country_code: contact.country_code || split.country_code || defaultCountryOption?.dialCode || '91',
+      phone_number: contact.phone_number || split.phone_number || '',
       phone: contact.phone,
       name: contact.name || '',
       email: contact.email || '',
@@ -216,14 +244,23 @@ export default function Contacts() {
   };
 
   const saveContact = async () => {
-    if (!form.phone) {
-      toast.error('Phone required');
+    const parsedPhone = parsePhoneInput({
+      phone: form.phone,
+      country_code: form.country_code,
+      phone_number: form.phone_number,
+      default_country_code: defaultCountryOption?.dialCode || '91',
+    });
+
+    if (!parsedPhone.ok) {
+      toast.error(parsedPhone.error);
       return;
     }
     setSaving(true);
     try {
       const payload = {
-        phone: form.phone,
+        phone: parsedPhone.phone,
+        country_code: parsedPhone.country_code,
+        phone_number: parsedPhone.phone_number,
         name: form.name,
         email: form.email,
         labels: form.labels ? form.labels.split(',').map((label) => label.trim()).filter(Boolean) : [],
@@ -444,11 +481,11 @@ export default function Contacts() {
       {selectedCount ? <div className="mb-6 flex flex-col gap-3 rounded-[28px] border border-emerald-100 bg-emerald-50/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-white"><CheckSquare2 className="h-5 w-5" /></div><div><p className="text-sm font-semibold text-emerald-900">{selectedCount} contact(s) selected</p><p className="text-xs text-emerald-700">Selection stays active across pages and filters until you clear it.</p></div></div><div className="flex flex-wrap gap-2"><button onClick={() => openSendModalForContacts(selectedContacts)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700"><Send className="h-4 w-4" />Send Message</button><button onClick={deleteSelected} className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" />Delete Selected</button><button onClick={() => setSelectedMap({})} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"><X className="h-4 w-4" />Clear</button></div></div> : null}
 
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
-        {loading ? <div className="space-y-3 p-6">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-gray-100" />)}</div> : contacts.length === 0 ? <div className="py-16 text-center"><Users className="mx-auto mb-3 h-12 w-12 text-gray-200" /><p className="font-medium text-gray-400">No contacts found</p></div> : <><div className="overflow-x-auto"><table className="w-full"><thead><tr className="border-b border-gray-100"><th className="px-4 py-3 text-left"><button type="button" onClick={toggleSelectPage} className="text-gray-400 hover:text-emerald-600">{allPageSelected ? <CheckSquare2 className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></th><th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Contact</th><th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Phone</th><th className="hidden px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 md:table-cell">WhatsApp</th><th className="hidden px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 lg:table-cell">Tags</th><th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Actions</th></tr></thead><tbody>{contacts.map((contact) => <tr key={contact._id} className="border-b border-gray-50 hover:bg-gray-50/50"><td className="px-4 py-3.5"><button type="button" onClick={() => toggleSelect(contact)} className="text-gray-400 hover:text-emerald-600">{selectedMap[contact._id] ? <CheckSquare2 className="h-4 w-4 text-emerald-600" /> : <Square className="h-4 w-4" />}</button></td><td className="px-6 py-3.5"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-xs font-bold text-white">{(contact.wa_name || contact.name || contact.phone)[0]?.toUpperCase()}</div><div><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p>{contact.email ? <p className="text-xs text-gray-400">{contact.email}</p> : null}</div></div></td><td className="px-6 py-3.5"><span className="text-sm text-gray-600">+{contact.phone}</span></td><td className="hidden px-6 py-3.5 md:table-cell">{WA_BADGE[contact.wa_exists || 'unknown']}</td><td className="hidden px-6 py-3.5 lg:table-cell"><div className="flex flex-wrap gap-1">{(contact.labels || []).slice(0, 3).map((label) => <span key={label} className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">{label}</span>)}</div></td><td className="px-6 py-3.5"><div className="flex items-center justify-end gap-1"><button onClick={() => openSendModalForContacts(contact)} className="rounded-lg p-1.5 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600"><MessageSquare className="h-3.5 w-3.5" /></button><button onClick={() => openEditModal(contact)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"><Edit3 className="h-3.5 w-3.5" /></button><button onClick={() => deleteContact(contact._id)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button></div></td></tr>)}</tbody></table></div><div className="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-gray-400">Page {pagination.page} of {pagination.pages} • {pagination.total} total contacts</span><div className="flex items-center gap-1"><button disabled={pagination.page <= 1} onClick={() => fetchContacts(pagination.page - 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"><ChevronLeft className="h-4 w-4" /></button>{pageNumbers.map((page, index) => <div key={page} className="flex items-center">{index > 0 && pageNumbers[index - 1] !== page - 1 ? <span className="px-2 text-xs text-gray-300"><MoreHorizontal className="h-3.5 w-3.5" /></span> : null}<button type="button" onClick={() => fetchContacts(page)} className={`min-w-[2rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold ${page === pagination.page ? 'bg-emerald-500 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>{page}</button></div>)}<button disabled={pagination.page >= pagination.pages} onClick={() => fetchContacts(pagination.page + 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"><ChevronRight className="h-4 w-4" /></button></div></div></>}
+        {loading ? <div className="space-y-3 p-6">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-gray-100" />)}</div> : contacts.length === 0 ? <div className="py-16 text-center"><Users className="mx-auto mb-3 h-12 w-12 text-gray-200" /><p className="font-medium text-gray-400">No contacts found</p></div> : <><div className="overflow-x-auto"><table className="w-full"><thead><tr className="border-b border-gray-100"><th className="px-4 py-3 text-left"><button type="button" onClick={toggleSelectPage} className="text-gray-400 hover:text-emerald-600">{allPageSelected ? <CheckSquare2 className="h-4 w-4" /> : <Square className="h-4 w-4" />}</button></th><th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Contact</th><th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">Phone</th><th className="hidden px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 md:table-cell">WhatsApp</th><th className="hidden px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 lg:table-cell">Tags</th><th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">Actions</th></tr></thead><tbody>{contacts.map((contact) => <tr key={contact._id} className="border-b border-gray-50 hover:bg-gray-50/50"><td className="px-4 py-3.5"><button type="button" onClick={() => toggleSelect(contact)} className="text-gray-400 hover:text-emerald-600">{selectedMap[contact._id] ? <CheckSquare2 className="h-4 w-4 text-emerald-600" /> : <Square className="h-4 w-4" />}</button></td><td className="px-6 py-3.5"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-xs font-bold text-white">{(contact.wa_name || contact.name || contact.phone)[0]?.toUpperCase()}</div><div><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p>{contact.email ? <p className="text-xs text-gray-400">{contact.email}</p> : null}</div></div></td><td className="px-6 py-3.5"><span className="text-sm text-gray-600">{formatDisplayPhone(contact.phone, contact.country_code)}</span></td><td className="hidden px-6 py-3.5 md:table-cell">{WA_BADGE[contact.wa_exists || 'unknown']}</td><td className="hidden px-6 py-3.5 lg:table-cell"><div className="flex flex-wrap gap-1">{(contact.labels || []).slice(0, 3).map((label) => <span key={label} className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">{label}</span>)}</div></td><td className="px-6 py-3.5"><div className="flex items-center justify-end gap-1"><button onClick={() => openSendModalForContacts(contact)} className="rounded-lg p-1.5 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600"><MessageSquare className="h-3.5 w-3.5" /></button><button onClick={() => openEditModal(contact)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"><Edit3 className="h-3.5 w-3.5" /></button><button onClick={() => deleteContact(contact._id)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button></div></td></tr>)}</tbody></table></div><div className="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs text-gray-400">Page {pagination.page} of {pagination.pages} • {pagination.total} total contacts</span><div className="flex items-center gap-1"><button disabled={pagination.page <= 1} onClick={() => fetchContacts(pagination.page - 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"><ChevronLeft className="h-4 w-4" /></button>{pageNumbers.map((page, index) => <div key={page} className="flex items-center">{index > 0 && pageNumbers[index - 1] !== page - 1 ? <span className="px-2 text-xs text-gray-300"><MoreHorizontal className="h-3.5 w-3.5" /></span> : null}<button type="button" onClick={() => fetchContacts(page)} className={`min-w-[2rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold ${page === pagination.page ? 'bg-emerald-500 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>{page}</button></div>)}<button disabled={pagination.page >= pagination.pages} onClick={() => fetchContacts(pagination.page + 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"><ChevronRight className="h-4 w-4" /></button></div></div></>}
       </div>
       <PortalModal open={showAdd} onClose={() => { setShowAdd(false); setEditId(null); }} title={`${editId ? 'Edit' : 'Add'} Contact`} subtitle="Save contact details for future messaging." size="md">
         <div className="space-y-4">
-          <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">Phone *</label><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="919876543210" disabled={Boolean(editId)} className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40 disabled:opacity-50" /></div>
+          <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">Phone *</label><div className="grid grid-cols-[140px,1fr] gap-2"><select value={form.country_code} onChange={(event) => setForm({ ...form, country_code: event.target.value, phone: `${event.target.value}${form.phone_number}` })} className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40">{COUNTRY_PHONE_OPTIONS.map((option) => <option key={`${option.iso2}-${option.dialCode}`} value={option.dialCode}>{option.country} (+{option.dialCode})</option>)}</select><input value={form.phone_number} onChange={(event) => setForm({ ...form, phone_number: event.target.value.replace(/[^\d]/g, ''), phone: `${form.country_code}${event.target.value.replace(/[^\d]/g, '')}` })} placeholder="9876543210" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /></div></div>
           <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">Name</label><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="John Doe" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /></div>
           <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">Email</label><input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="john@example.com" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /></div>
           <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">Tags</label><input value={form.labels} onChange={(event) => setForm({ ...form, labels: event.target.value })} placeholder="vip, customer, lead" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /></div>
@@ -457,7 +494,7 @@ export default function Contacts() {
         </div>
       </PortalModal>
 
-      <ContactImportWizard open={showImport} onClose={() => setShowImport(false)} onImported={() => fetchContacts(1)} />
+      <ContactImportWizard open={showImport} onClose={() => setShowImport(false)} onImported={() => fetchContacts(1)} defaultCountryCode={defaultCountryOption?.dialCode || '91'} />
 
       <PortalModal open={showSend} onClose={() => setShowSend(false)} title="Send to Selected Contacts" subtitle="Use text, Meta templates, or gallery media for the contacts you selected." size="xl">
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">
@@ -466,7 +503,7 @@ export default function Contacts() {
               <label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Message Type</label>
               <div className="flex gap-2">{[{ key: 'text', label: 'Text', icon: Send }, { key: 'template', label: 'Meta Template', icon: FileText }, { key: 'media', label: 'Media Gallery', icon: Image }].map((item) => <button key={item.key} type="button" onClick={() => { setSendMode(item.key); if (item.key !== 'template') setSelectedTemplate(null); }} className={`flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all ${sendMode === item.key ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100'}`}><item.icon className="h-4 w-4" />{item.label}</button>)}</div>
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Selected Audience</label><div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"><span>{contact.wa_name || contact.name || contact.phone}</span><span className="text-emerald-500">+{contact.phone}</span></div>)}</div></div>
+            <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Selected Audience</label><div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"><span>{contact.wa_name || contact.name || contact.phone}</span><span className="text-emerald-500">{formatDisplayPhone(contact.phone, contact.country_code)}</span></div>)}</div></div>
 
             {sendMode === 'text' ? <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Message</label><textarea value={sendText} onChange={(event) => setSendText(event.target.value)} placeholder="Type your message..." rows={6} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /><div className="mt-2 flex items-center justify-between"><span className="text-xs text-gray-400">{sendText.length}/4096</span><div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-600"><AlertTriangle className="h-3.5 w-3.5" /><span>Requires 24h window</span></div></div></div> : null}
 
@@ -476,7 +513,7 @@ export default function Contacts() {
 
             <button type="button" onClick={sendToSelected} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">{sending ? <><div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />Sending via Meta...</> : <><Send className="h-4 w-4" />Send to Selected Contacts</>}</button>
           </div>
-          <div className="space-y-5"><div className="rounded-2xl border border-gray-100 bg-white p-5"><div className="mb-4 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /><h3 className="text-sm font-semibold text-gray-900">Selected Contacts</h3></div><div className="max-h-[18rem] space-y-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p><p className="mt-1 text-xs text-gray-500">+{contact.phone}</p></div>)}</div></div></div>
+          <div className="space-y-5"><div className="rounded-2xl border border-gray-100 bg-white p-5"><div className="mb-4 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /><h3 className="text-sm font-semibold text-gray-900">Selected Contacts</h3></div><div className="max-h-[18rem] space-y-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p><p className="mt-1 text-xs text-gray-500">{formatDisplayPhone(contact.phone, contact.country_code)}</p></div>)}</div></div></div>
         </div>
       </PortalModal>
 

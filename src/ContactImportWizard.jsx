@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle,
@@ -11,11 +11,14 @@ import {
 } from 'lucide-react';
 import api from './api/axios';
 import PortalModal from './components/Portal/PortalModal';
+import { COUNTRY_PHONE_OPTIONS, parsePhoneInput } from './utils/phone';
 
 const IGNORE_OPTION = '__ignore__';
 
 const IMPORT_FIELDS = [
   { key: 'phone', label: 'Phone Number', description: 'Required WhatsApp or mobile number', required: true },
+  { key: 'country_code', label: 'Country Code', description: 'Dial code such as 91, 1, 44' },
+  { key: 'phone_number', label: 'Local Number', description: 'Phone number without country code' },
   { key: 'name', label: 'Name', description: 'Display name for the contact' },
   { key: 'email', label: 'Email', description: 'Optional email address' },
   { key: 'labels', label: 'Tags', description: 'Comma, semicolon, or pipe separated tags' },
@@ -24,6 +27,8 @@ const IMPORT_FIELDS = [
 
 const FIELD_ALIASES = {
   phone: ['phone', 'phone number', 'mobile', 'mobile number', 'number', 'whatsapp', 'whatsapp number', 'wa number', 'contact number'],
+  country_code: ['country code', 'dial code', 'isd code', 'cc'],
+  phone_number: ['phone number only', 'local number', 'national number', 'mobile number only'],
   name: ['name', 'full name', 'customer name', 'first name', 'display name'],
   email: ['email', 'email address', 'mail'],
   labels: ['labels', 'label', 'tags', 'tag', 'groups', 'category', 'categories', 'segment'],
@@ -36,8 +41,6 @@ const normalizeHeader = (value = '') =>
     .toLowerCase()
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ');
-
-const normalizePhone = (value = '') => String(value || '').replace(/[^\d]/g, '');
 
 const splitLabels = (value) => {
   if (Array.isArray(value)) {
@@ -109,10 +112,15 @@ const guessMapping = (headers) => {
   return nextMapping;
 };
 
-const buildMappedRows = (rows, mapping) =>
+const buildMappedRows = (rows, mapping, defaultCountryCode) =>
   rows.map((row) => ({
+    ...parsePhoneInput({
+      phone: mapping.phone !== IGNORE_OPTION ? String(row[mapping.phone] || '').trim() : '',
+      country_code: mapping.country_code !== IGNORE_OPTION ? String(row[mapping.country_code] || '').trim() : '',
+      phone_number: mapping.phone_number !== IGNORE_OPTION ? String(row[mapping.phone_number] || '').trim() : '',
+      default_country_code: defaultCountryCode,
+    }),
     row_number: row.__rowNumber,
-    phone: mapping.phone !== IGNORE_OPTION ? normalizePhone(row[mapping.phone]) : '',
     name: mapping.name !== IGNORE_OPTION ? String(row[mapping.name] || '').trim() : '',
     email: mapping.email !== IGNORE_OPTION ? String(row[mapping.email] || '').trim() : '',
     labels: mapping.labels !== IGNORE_OPTION ? splitLabels(row[mapping.labels]) : [],
@@ -123,7 +131,8 @@ const buildPreviewRows = (mappedRows) => {
   const seen = new Set();
   return mappedRows.map((row) => {
     let issue = null;
-    if (!row.phone) issue = 'Missing phone number';
+    if (!row.phone) issue = row.error || 'Missing phone number';
+    else if (!row.ok) issue = row.error || 'Invalid phone number';
     else if (seen.has(row.phone)) issue = 'Duplicate phone in file';
     else seen.add(row.phone);
 
@@ -137,7 +146,7 @@ const buildPreviewRows = (mappedRows) => {
 
 const getStepIndex = (step) => ['upload', 'mapping', 'review', 'result'].indexOf(step);
 
-export default function ContactImportWizard({ open, onClose, onImported }) {
+export default function ContactImportWizard({ open, onClose, onImported, defaultCountryCode = '91' }) {
   const fileInputRef = useRef(null);
   const [step, setStep] = useState('upload');
   const [fileMeta, setFileMeta] = useState(null);
@@ -148,6 +157,7 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
   const [importing, setImporting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [importReport, setImportReport] = useState(null);
+  const [defaultDialCode, setDefaultDialCode] = useState(defaultCountryCode || '91');
 
   useEffect(() => {
     if (open) return;
@@ -160,9 +170,10 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
     setImporting(false);
     setDragActive(false);
     setImportReport(null);
+    setDefaultDialCode(defaultCountryCode || '91');
   }, [open]);
 
-  const mappedRows = useMemo(() => buildMappedRows(rawRows, mapping), [rawRows, mapping]);
+  const mappedRows = useMemo(() => buildMappedRows(rawRows, mapping, defaultDialCode), [rawRows, mapping, defaultDialCode]);
   const previewRows = useMemo(() => buildPreviewRows(mappedRows), [mappedRows]);
 
   const previewSummary = useMemo(() => {
@@ -201,6 +212,22 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
 
   const openPicker = () => fileInputRef.current?.click();
 
+  const downloadSampleCsv = () => {
+    const sample = [
+      ['country_code', 'phone_number', 'name', 'email', 'labels', 'notes'],
+      [defaultDialCode, '9876543210', 'Sample Contact', 'sample@example.com', 'vip,lead', 'Imported with country code'],
+    ]
+      .map((row) => row.map((value) => `"${String(value || '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([sample], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'contacts_sample_with_country_code.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleChangeFile = async (event) => {
     const file = event.target.files?.[0];
     if (event.target) event.target.value = '';
@@ -208,8 +235,10 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
   };
 
   const goToReview = () => {
-    if (!mapping.phone || mapping.phone === IGNORE_OPTION) {
-      toast.error('Map a phone number column before continuing');
+    const hasCombinedPhone = mapping.phone && mapping.phone !== IGNORE_OPTION;
+    const hasSplitPhone = mapping.country_code && mapping.country_code !== IGNORE_OPTION && mapping.phone_number && mapping.phone_number !== IGNORE_OPTION;
+    if (!hasCombinedPhone && !hasSplitPhone) {
+      toast.error('Map phone or both country code + local number columns before continuing');
       return;
     }
     setStep('review');
@@ -224,7 +253,7 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
     setImporting(true);
     try {
       const { data } = await api.post('/contacts/import', {
-        contacts: mappedRows,
+        contacts: mappedRows.map(({ ok, error, ...row }) => row),
       });
       setImportReport(data.data);
       setStep('result');
@@ -314,8 +343,15 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
                 {parsing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                 {parsing ? 'Reading file...' : 'Choose file'}
               </button>
+              <button
+                type="button"
+                onClick={downloadSampleCsv}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-200 bg-white px-5 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+              >
+                Download Sample CSV
+              </button>
               <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-500">
-                Supported columns: phone, name, email, tags, notes
+                Supported columns: phone or country_code + phone_number, name, email, tags, notes
               </div>
             </div>
           </div>
@@ -328,6 +364,20 @@ export default function ContactImportWizard({ open, onClose, onImported }) {
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Uploaded File</p>
                 <h3 className="mt-1 text-lg font-semibold text-gray-900">{fileMeta?.name}</h3>
                 <p className="mt-1 text-sm text-gray-500">{rawRows.length} data row(s) from sheet {fileMeta?.sheetName}</p>
+              </div>
+              <div className="mb-5 rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Default Country Code</p>
+                <select
+                  value={defaultDialCode}
+                  onChange={(event) => setDefaultDialCode(event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700"
+                >
+                  {COUNTRY_PHONE_OPTIONS.map((option) => (
+                    <option key={`${option.iso2}-${option.dialCode}`} value={option.dialCode}>
+                      {option.country} (+{option.dialCode})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-4">

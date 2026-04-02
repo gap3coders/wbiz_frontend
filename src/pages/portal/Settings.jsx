@@ -53,6 +53,7 @@ export default function SettingsPage() {
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyPin, setVerifyPin] = useState('');
   const [deletingPhoneId, setDeletingPhoneId] = useState(null);
+  const [runningPhoneMigration, setRunningPhoneMigration] = useState(false);
   const devError = (...args) => {
     if (import.meta.env.DEV) console.error(...args);
   };
@@ -256,6 +257,21 @@ export default function SettingsPage() {
     }
   };
 
+  const runContactPhoneNormalization = async () => {
+    if (!window.confirm('Run contact phone normalization now? This updates existing contacts to country code + local number format.')) return;
+    setRunningPhoneMigration(true);
+    try {
+      const { data } = await api.post('/contacts/maintenance/normalize-phones');
+      const report = data?.data || {};
+      toast.success(`Done. Scanned ${report.scanned || 0}, updated ${report.updated || 0}, skipped ${report.skipped || 0}.`);
+    } catch (e) {
+      const err = e.response?.data;
+      toast.error(err?.error || 'Failed to run phone normalization');
+    } finally {
+      setRunningPhoneMigration(false);
+    }
+  };
+
   const qc = (r) => {
     if (r === 'green') return 'text-emerald-600 bg-emerald-50';
     if (r === 'yellow') return 'text-amber-600 bg-amber-50';
@@ -347,6 +363,19 @@ export default function SettingsPage() {
             <button onClick={reconnect} className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-100">
               <RefreshCw className="w-4 h-4" />
               Disconnect & Reconnect
+            </button>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-6">
+            <h3 className="font-display font-semibold text-gray-900 mb-2">Data Maintenance</h3>
+            <p className="text-sm text-gray-500 mb-4">Normalize all existing contact numbers into country code + local number format.</p>
+            <button
+              onClick={runContactPhoneNormalization}
+              disabled={runningPhoneMigration}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 text-sm font-semibold rounded-xl hover:bg-blue-100 disabled:opacity-60"
+            >
+              {runningPhoneMigration ? <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-700 rounded-full animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              {runningPhoneMigration ? 'Running...' : 'Run Contact Phone Migration'}
             </button>
           </div>
         </div>
