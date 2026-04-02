@@ -44,12 +44,49 @@ export default function Campaigns() {
     return vars;
   };
 
+  const variableConfigFor = (key) => {
+    const current = form.variable_mapping?.[`body_${key}`];
+    if (!current) return { source: 'custom', value: '' };
+    if (typeof current === 'string') return { source: current === 'static' ? 'custom' : current, value: '' };
+    return { source: current.source || 'custom', value: current.value || '' };
+  };
+
+  const setVariableConfig = (key, nextPatch) => {
+    setForm((prev) => {
+      const current = prev.variable_mapping?.[`body_${key}`];
+      const normalized = typeof current === 'string'
+        ? { source: current === 'static' ? 'custom' : current, value: '' }
+        : { source: 'custom', value: '', ...(current || {}) };
+      return {
+        ...prev,
+        variable_mapping: {
+          ...(prev.variable_mapping || {}),
+          [`body_${key}`]: { ...normalized, ...nextPatch },
+        },
+      };
+    });
+  };
+
   const handleCreate = async () => {
     if(!form.name||!form.template_name){toast.error('Name & template required');return;}
     if(form.target_type==='selected'&&form.recipients.length===0){toast.error('Select recipients');return;}
     if(form.target_type==='tags'&&form.target_tags.length===0){toast.error('Select tags');return;}
+    const requiredVars = extractVars(form.template_name);
+    for (const key of requiredVars) {
+      const config = variableConfigFor(key);
+      if (config.source === 'custom' && !String(config.value || '').trim()) {
+        toast.error(`Add value for template variable {{${key}}}`);
+        return;
+      }
+    }
     setCreating(true);
-    try { await api.post('/campaigns',form); toast.success('Campaign created!'); setShowCreate(false); fetch_(); }
+    try {
+      const { data } = await api.post('/campaigns',form);
+      if (data?.data?.launch === 'started') toast.success('Campaign published and started now.');
+      else toast.success('Campaign scheduled successfully.');
+      setShowCreate(false);
+      fetch_();
+    }
     catch(e){const err=e.response?.data; toast.error(err?.error_source==='meta'?`Meta Error: ${err.error}`:`Platform: ${err?.error||'Failed'}`);} finally{setCreating(false);}
   };
 
@@ -115,24 +152,34 @@ export default function Campaigns() {
           <div className="p-6">
             {step===1&&<div className="space-y-4">
               <div><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Campaign Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="March Promo" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"/></div>
-              <div><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Schedule (Optional)</label><input type="datetime-local" value={form.scheduled_at} onChange={e=>setForm({...form,scheduled_at:e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"/><p className="text-[10px] text-gray-400 mt-1">Leave empty to send manually</p></div>
+              <div><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Schedule (Optional)</label><input type="datetime-local" value={form.scheduled_at} onChange={e=>setForm({...form,scheduled_at:e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"/><p className="text-[10px] text-gray-400 mt-1">Leave empty to start instantly after publish</p></div>
             </div>}
 
             {step===2&&<div className="space-y-4">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Select Meta-Approved Template</label>
               {templates.length===0?<p className="text-sm text-gray-400 text-center py-8">No approved templates</p>
               :<div className="space-y-2 max-h-60 overflow-y-auto">{templates.map(t=>{const vars=extractVars(t.name);return(
-                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
+                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{}});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
               )})}</div>}
               {form.template_name && extractVars(form.template_name).length>0 && (
                 <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
                   <p className="text-xs font-semibold text-amber-700 mb-2">Template Variables</p>
                   {extractVars(form.template_name).map(v=>(
-                    <div key={v} className="flex items-center gap-2 mb-2">
+                    <div key={v} className="grid grid-cols-[auto,1fr] gap-2 mb-2 items-center">
                       <span className="text-xs font-mono bg-amber-100 text-amber-800 px-2 py-1 rounded">{`{{${v}}}`}</span>
-                      <select value={form.variable_mapping[`body_${v}`]||'static'} onChange={e=>setForm(f=>({...f,variable_mapping:{...f.variable_mapping,[`body_${v}`]:e.target.value}}))} className="text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500">
-                        <option value="static">Static value</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option>
+                      <div className="space-y-2">
+                        <select value={variableConfigFor(v).source} onChange={e=>setVariableConfig(v,{source:e.target.value})} className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500">
+                          <option value="custom">Custom input</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option>
                       </select>
+                        {variableConfigFor(v).source === 'custom' ? (
+                          <input
+                            value={variableConfigFor(v).value}
+                            onChange={(e) => setVariableConfig(v, { value: e.target.value })}
+                            placeholder={`Value for {{${v}}}`}
+                            className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
+                          />
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -175,7 +222,7 @@ export default function Campaigns() {
           <div className="flex justify-between gap-3 px-6 py-4 border-t border-gray-100">
             {step>1?<button onClick={()=>setStep(step-1)} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl">Back</button>:<div/>}
             {step<4?<button onClick={()=>setStep(step+1)} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600">Next<ArrowRight className="w-4 h-4"/></button>
-            :<button onClick={handleCreate} disabled={creating} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 disabled:opacity-50">{creating?<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>:<Send className="w-4 h-4"/>}Create Campaign</button>}
+            :<button onClick={handleCreate} disabled={creating} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 disabled:opacity-50">{creating?<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>:<Send className="w-4 h-4"/>}Publish Campaign</button>}
           </div>
         </div></div>
       )}

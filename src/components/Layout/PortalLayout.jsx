@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
@@ -30,28 +30,94 @@ const SEV_STYLES = {
 export default function PortalLayout() {
   const { user, tenant, logout, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
   const notifRef = useRef(null);
+  const notifSeenRef = useRef('');
+  const inboxSeenRef = useRef(0);
+
+  const navItems = useMemo(
+    () =>
+      NAV_ITEMS.map((item) =>
+        item.to === '/portal/inbox'
+          ? { ...item, badge: inboxUnreadCount > 0 ? inboxUnreadCount : null }
+          : item
+      ),
+    [inboxUnreadCount]
+  );
 
   const fetchNotifs = useCallback(async () => {
     if (loading || !isAuthenticated) return;
     try {
       const { data } = await api.get('/notifications', { params: { limit: 20 } });
-      setNotifications(data.data.notifications || []);
+      const nextNotifications = data.data.notifications || [];
+      setNotifications(nextNotifications);
       setUnreadCount(data.data.unread_count || 0);
+      const latest = nextNotifications.find((item) => !item.read) || nextNotifications[0];
+      if (latest && notifSeenRef.current && notifSeenRef.current !== latest._id && location.pathname.startsWith('/portal')) {
+        toast(
+          (t) => (
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                if (latest.link) navigate(latest.link);
+              }}
+              className="w-full rounded-lg bg-white px-3 py-2 text-left shadow-lg"
+            >
+              <p className="text-xs font-semibold text-gray-900">{latest.title || 'New notification'}</p>
+              <p className="mt-0.5 text-xs text-gray-500 line-clamp-2">{latest.message || ''}</p>
+            </button>
+          ),
+          { duration: 5000 }
+        );
+      }
+      notifSeenRef.current = latest?._id || notifSeenRef.current;
     } catch (e) {}
-  }, [isAuthenticated, loading]);
+  }, [isAuthenticated, loading, location.pathname, navigate]);
+
+  const fetchInboxUnread = useCallback(async () => {
+    if (loading || !isAuthenticated) return;
+    try {
+      const { data } = await api.get('/conversations');
+      const unread = Number(data?.data?.counts?.unread || 0);
+      setInboxUnreadCount(unread);
+      if (inboxSeenRef.current > 0 && unread > inboxSeenRef.current && !location.pathname.startsWith('/portal/inbox')) {
+        toast(
+          (t) => (
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                navigate('/portal/inbox');
+              }}
+              className="w-full rounded-lg bg-white px-3 py-2 text-left shadow-lg"
+            >
+              <p className="text-xs font-semibold text-gray-900">New unread message</p>
+              <p className="mt-0.5 text-xs text-gray-500">You have {unread} unread chat message(s). Click to open live chat.</p>
+            </button>
+          ),
+          { duration: 4500 }
+        );
+      }
+      inboxSeenRef.current = unread;
+    } catch (e) {}
+  }, [isAuthenticated, loading, location.pathname, navigate]);
 
   useEffect(() => {
     if (loading || !isAuthenticated) return undefined;
     fetchNotifs();
-    const i = setInterval(fetchNotifs, 15000);
-    return () => clearInterval(i);
-  }, [fetchNotifs, isAuthenticated, loading]);
+    fetchInboxUnread();
+    const i1 = setInterval(fetchNotifs, 15000);
+    const i2 = setInterval(fetchInboxUnread, 15000);
+    return () => {
+      clearInterval(i1);
+      clearInterval(i2);
+    };
+  }, [fetchNotifs, fetchInboxUnread, isAuthenticated, loading]);
   useEffect(() => {
     const handler = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotif(false); };
     document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler);
@@ -69,13 +135,18 @@ export default function PortalLayout() {
         {!collapsed && <span className="font-display font-bold text-white text-base truncate">WASend</span>}
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map((item, i) => {
+        {navItems.map((item, i) => {
           if (item.divider) return <div key={i} className="my-3 border-t border-gray-800/50" />;
           return (
             <NavLink key={item.to} to={item.to} onClick={() => setMobileOpen(false)}
               className={({ isActive }) => `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${isActive ? 'bg-emerald-500/15 text-emerald-400' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
               <item.icon className="w-5 h-5 flex-shrink-0" />
               {!collapsed && <span className="truncate">{item.label}</span>}
+              {item.badge ? (
+                <span className={`ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white ${collapsed ? 'hidden' : ''}`}>
+                  {item.badge > 99 ? '99+' : item.badge}
+                </span>
+              ) : null}
             </NavLink>
           );
         })}
