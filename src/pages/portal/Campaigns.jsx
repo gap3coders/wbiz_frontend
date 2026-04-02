@@ -40,20 +40,28 @@ export default function Campaigns() {
     const tpl = templates.find(t=>t.name===tplName);
     if (!tpl) return [];
     const vars = [];
-    for (const comp of (tpl.components||[])) { if (comp.type==='BODY'&&comp.text) { (comp.text.match(/\{\{(\d+)\}\}/g)||[]).forEach(m=>{const n=m.replace(/[{}]/g,'');if(!vars.includes(n))vars.push(n);}); } }
+    for (const comp of (tpl.components||[])) {
+      const slot = String(comp.type || '').toUpperCase();
+      if (!['BODY', 'HEADER'].includes(slot) || !comp.text) continue;
+      (comp.text.match(/\{\{(\d+)\}\}/g)||[]).forEach((match) => {
+        const n = match.replace(/[{}]/g,'');
+        const token = { key: `${slot.toLowerCase()}_${n}`, slot: slot.toLowerCase(), index: n };
+        if (!vars.some((item) => item.key === token.key)) vars.push(token);
+      });
+    }
     return vars;
   };
 
-  const variableConfigFor = (key) => {
-    const current = form.variable_mapping?.[`body_${key}`];
+  const variableConfigFor = (tokenKey) => {
+    const current = form.variable_mapping?.[tokenKey];
     if (!current) return { source: 'custom', value: '' };
     if (typeof current === 'string') return { source: current === 'static' ? 'custom' : current, value: '' };
     return { source: current.source || 'custom', value: current.value || '' };
   };
 
-  const setVariableConfig = (key, nextPatch) => {
+  const setVariableConfig = (tokenKey, nextPatch) => {
     setForm((prev) => {
-      const current = prev.variable_mapping?.[`body_${key}`];
+      const current = prev.variable_mapping?.[tokenKey];
       const normalized = typeof current === 'string'
         ? { source: current === 'static' ? 'custom' : current, value: '' }
         : { source: 'custom', value: '', ...(current || {}) };
@@ -61,7 +69,7 @@ export default function Campaigns() {
         ...prev,
         variable_mapping: {
           ...(prev.variable_mapping || {}),
-          [`body_${key}`]: { ...normalized, ...nextPatch },
+          [tokenKey]: { ...normalized, ...nextPatch },
         },
       };
     });
@@ -72,10 +80,10 @@ export default function Campaigns() {
     if(form.target_type==='selected'&&form.recipients.length===0){toast.error('Select recipients');return;}
     if(form.target_type==='tags'&&form.target_tags.length===0){toast.error('Select tags');return;}
     const requiredVars = extractVars(form.template_name);
-    for (const key of requiredVars) {
-      const config = variableConfigFor(key);
+    for (const token of requiredVars) {
+      const config = variableConfigFor(token.key);
       if (config.source === 'custom' && !String(config.value || '').trim()) {
-        toast.error(`Add value for template variable {{${key}}}`);
+        toast.error(`Add value for ${token.slot.toUpperCase()} variable {{${token.index}}}`);
         return;
       }
     }
@@ -164,18 +172,18 @@ export default function Campaigns() {
               {form.template_name && extractVars(form.template_name).length>0 && (
                 <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
                   <p className="text-xs font-semibold text-amber-700 mb-2">Template Variables</p>
-                  {extractVars(form.template_name).map(v=>(
-                    <div key={v} className="grid grid-cols-[auto,1fr] gap-2 mb-2 items-center">
-                      <span className="text-xs font-mono bg-amber-100 text-amber-800 px-2 py-1 rounded">{`{{${v}}}`}</span>
+                  {extractVars(form.template_name).map((token)=>(
+                    <div key={token.key} className="grid grid-cols-[auto,1fr] gap-2 mb-2 items-center">
+                      <span className="text-xs font-mono bg-amber-100 text-amber-800 px-2 py-1 rounded">{`${token.slot.toUpperCase()} {{${token.index}}}`}</span>
                       <div className="space-y-2">
-                        <select value={variableConfigFor(v).source} onChange={e=>setVariableConfig(v,{source:e.target.value})} className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500">
+                        <select value={variableConfigFor(token.key).source} onChange={e=>setVariableConfig(token.key,{source:e.target.value})} className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500">
                           <option value="custom">Custom input</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option>
                       </select>
-                        {variableConfigFor(v).source === 'custom' ? (
+                        {variableConfigFor(token.key).source === 'custom' ? (
                           <input
-                            value={variableConfigFor(v).value}
-                            onChange={(e) => setVariableConfig(v, { value: e.target.value })}
-                            placeholder={`Value for {{${v}}}`}
+                            value={variableConfigFor(token.key).value}
+                            onChange={(e) => setVariableConfig(token.key, { value: e.target.value })}
+                            placeholder={`Value for ${token.slot.toUpperCase()} {{${token.index}}}`}
                             className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
                           />
                         ) : null}
