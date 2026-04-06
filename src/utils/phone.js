@@ -92,9 +92,11 @@ export const splitCombinedPhone = (phone = '', fallbackCountryCode = '91') => {
 };
 
 export const parsePhoneInput = ({ phone = '', country_code = '', phone_number = '', default_country_code = '91' } = {}) => {
+  const rawPhone = String(phone || '').trim();
   const directCountryCode = normalizeCountryCode(country_code);
   const directPhoneNumber = normalizeNationalNumber(phone_number);
   const combined = digitsOnly(phone);
+  const hasExplicitIntlPrefix = rawPhone.startsWith('+') || rawPhone.startsWith('00');
 
   let resolvedCountryCode = directCountryCode;
   let resolvedPhoneNumber = directPhoneNumber;
@@ -103,10 +105,24 @@ export const parsePhoneInput = ({ phone = '', country_code = '', phone_number = 
   if (resolvedCountryCode && resolvedPhoneNumber) {
     resolvedPhone = `${resolvedCountryCode}${resolvedPhoneNumber}`;
   } else if (combined) {
-    const split = splitCombinedPhone(combined, default_country_code);
-    resolvedCountryCode = resolvedCountryCode || split.country_code;
-    resolvedPhoneNumber = resolvedPhoneNumber || split.phone_number;
-    resolvedPhone = split.phone;
+    const fallbackCountryCode = normalizeCountryCode(default_country_code);
+    if (!directCountryCode && !directPhoneNumber && !hasExplicitIntlPrefix && fallbackCountryCode) {
+      const alreadyWithFallback = combined.startsWith(fallbackCountryCode) && combined.length > fallbackCountryCode.length + 5;
+      if (alreadyWithFallback) {
+        resolvedCountryCode = fallbackCountryCode;
+        resolvedPhoneNumber = combined.slice(fallbackCountryCode.length);
+        resolvedPhone = combined;
+      } else {
+        resolvedCountryCode = fallbackCountryCode;
+        resolvedPhoneNumber = combined;
+        resolvedPhone = `${fallbackCountryCode}${combined}`;
+      }
+    } else {
+      const split = splitCombinedPhone(combined, default_country_code);
+      resolvedCountryCode = resolvedCountryCode || split.country_code;
+      resolvedPhoneNumber = resolvedPhoneNumber || split.phone_number;
+      resolvedPhone = split.phone;
+    }
   } else if (resolvedCountryCode || resolvedPhoneNumber) {
     resolvedPhone = `${resolvedCountryCode}${resolvedPhoneNumber}`;
   }
