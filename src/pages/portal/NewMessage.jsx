@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle,
@@ -71,6 +71,7 @@ const renderAssetPreview = (asset) => {
 
 export default function NewMessage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState('template');
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
@@ -102,13 +103,23 @@ export default function NewMessage() {
   };
 
   useEffect(() => {
+    const queryTo = String(searchParams.get('to') || '').replace(/[^\d]/g, '');
+    if (queryTo) {
+      setTo(queryTo);
+      setContactSearch(queryTo);
+      setShowContactList(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const searchTerm = String(contactSearch || to || '').trim();
     api
-      .get('/contacts', { params: { search: contactSearch, limit: 20 } })
+      .get('/contacts', { params: { search: searchTerm, limit: 20 } })
       .then((response) => setContacts(response.data?.data?.contacts || []))
       .catch((error) => {
         devError('[New Message][Contacts Failed]', error?.response?.data || error);
       });
-  }, [contactSearch]);
+  }, [contactSearch, to]);
 
   useEffect(() => {
     if (mode !== 'template' || templates.length) return;
@@ -377,7 +388,7 @@ export default function NewMessage() {
                   />
                 </div>
 
-                {showContactList && contacts.length > 0 ? (
+                {showContactList ? (
                   <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
                     <div className="p-2">
                       <input
@@ -406,6 +417,9 @@ export default function NewMessage() {
                         </div>
                       </button>
                     ))}
+                    {!contacts.length ? (
+                      <p className="px-4 pb-3 text-xs text-gray-500">No contacts found for this search.</p>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

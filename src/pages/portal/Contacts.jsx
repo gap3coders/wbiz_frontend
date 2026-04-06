@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import PortalModal from '../../components/Portal/PortalModal';
 import MediaLibraryModal from '../../MediaLibraryModal';
 import ContactImportWizard from '../../ContactImportWizard';
-import { detectMediaAssetType, formatFileSize } from '../../mediaLibraryHelpers';
 import { COUNTRY_PHONE_OPTIONS, detectDefaultCountryOption, formatDisplayPhone, parsePhoneInput, splitCombinedPhone } from '../../utils/phone';
 import {
   Users,
@@ -24,13 +23,7 @@ import {
   CheckSquare2,
   Send,
   FileText,
-  Image,
-  Paperclip,
-  Mic,
-  Video,
   FolderOpen,
-  Link2,
-  AlertTriangle,
   MoreHorizontal,
   ChevronDown,
   ChevronUp,
@@ -40,19 +33,6 @@ const WA_BADGE = {
   yes: <span className="inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700"><CheckCircle2 className="h-3 w-3" />WhatsApp</span>,
   no: <span className="inline-flex items-center gap-0.5 rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600"><XCircle className="h-3 w-3" />No WA</span>,
   unknown: <span className="inline-flex items-center gap-0.5 rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-500"><HelpCircle className="h-3 w-3" />Unknown</span>,
-};
-
-const MEDIA_OPTIONS = [
-  { key: 'image', label: 'Image', icon: Image },
-  { key: 'video', label: 'Video', icon: Video },
-  { key: 'document', label: 'File', icon: Paperclip },
-  { key: 'audio', label: 'Audio', icon: Mic },
-];
-
-const mergeAssets = (current, incoming) => {
-  const map = new Map(current.map((asset) => [asset._id, asset]));
-  incoming.forEach((asset) => map.set(asset._id, asset));
-  return Array.from(map.values());
 };
 
 const extractVars = (template) => {
@@ -67,17 +47,6 @@ const extractVars = (template) => {
     });
   }
   return vars;
-};
-
-const renderAssetPreview = (asset) => {
-  if (asset.asset_type === 'image') {
-    return <img src={asset.public_url} alt={asset.original_name} className="h-24 w-full rounded-2xl object-cover" />;
-  }
-  if (asset.asset_type === 'video') {
-    return <video src={asset.public_url} className="h-24 w-full rounded-2xl bg-black object-cover" muted />;
-  }
-  const Icon = asset.asset_type === 'audio' ? Mic : FileText;
-  return <div className="flex h-24 w-full flex-col items-center justify-center rounded-2xl bg-slate-100 text-slate-500"><Icon className="mb-1 h-7 w-7" /><p className="text-[10px] font-semibold uppercase tracking-wide">{asset.asset_type}</p></div>;
 };
 
 const getPageNumbers = (current, total) => {
@@ -102,23 +71,15 @@ export default function Contacts() {
   const [defaultCountryOption, setDefaultCountryOption] = useState(COUNTRY_PHONE_OPTIONS[0]);
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [sendMode, setSendMode] = useState('text');
-  const [sendText, setSendText] = useState('');
+  const [sendMode, setSendMode] = useState('template');
   const [sending, setSending] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateVariables, setTemplateVariables] = useState({});
   const [showVariableConfig, setShowVariableConfig] = useState(false);
-  const [mediaType, setMediaType] = useState('image');
-  const [selectedAssets, setSelectedAssets] = useState([]);
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [queuedFiles, setQueuedFiles] = useState([]);
-  const [dragActive, setDragActive] = useState(false);
-  const [manualUrlOpen, setManualUrlOpen] = useState(false);
-  const [mediaUrl, setMediaUrl] = useState('');
-  const [manualFilename, setManualFilename] = useState('');
-  const [mediaCaption, setMediaCaption] = useState('');
+  const [templateHeaderUrl, setTemplateHeaderUrl] = useState('');
+  const [showTemplateHeaderLibrary, setShowTemplateHeaderLibrary] = useState(false);
 
   const devError = (...args) => {
     if (import.meta.env.DEV) console.error(...args);
@@ -169,36 +130,35 @@ export default function Contacts() {
   }, []);
 
   useEffect(() => {
-    if (!showSend || sendMode !== 'template' || templates.length) return;
+    if (!showSend || templates.length) return;
     setLoadingTemplates(true);
     api
       .get('/meta/templates')
       .then((response) => setTemplates(response.data?.data?.templates || []))
       .catch(() => toast.error('Failed to load Meta templates'))
       .finally(() => setLoadingTemplates(false));
-  }, [showSend, sendMode, templates.length]);
+  }, [showSend, templates.length]);
 
   const selectedContacts = useMemo(() => Object.values(selectedMap), [selectedMap]);
   const selectedCount = selectedContacts.length;
   const allPageSelected = contacts.length > 0 && contacts.every((contact) => selectedMap[contact._id]);
   const approvedTemplates = useMemo(() => templates.filter((template) => template.status === 'APPROVED'), [templates]);
   const templateVariableKeys = Object.keys(templateVariables);
+  const selectedTemplateHeaderFormat = useMemo(() => {
+    const header = selectedTemplate?.components?.find((component) => component.type === 'HEADER');
+    const format = String(header?.format || '').toUpperCase();
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) return '';
+    return format;
+  }, [selectedTemplate]);
   const pageNumbers = getPageNumbers(pagination.page, pagination.pages);
 
   const resetComposer = () => {
-    setSendMode('text');
-    setSendText('');
+    setSendMode('template');
     setSelectedTemplate(null);
     setTemplateVariables({});
     setShowVariableConfig(false);
-    setMediaType('image');
-    setSelectedAssets([]);
-    setQueuedFiles([]);
-    setManualUrlOpen(false);
-    setMediaUrl('');
-    setManualFilename('');
-    setMediaCaption('');
-    setDragActive(false);
+    setTemplateHeaderUrl('');
+    setShowTemplateHeaderLibrary(false);
   };
 
   const openAddModal = () => {
@@ -333,6 +293,7 @@ export default function Contacts() {
 
   const handleSelectTemplate = (template) => {
     setSelectedTemplate(template);
+    setTemplateHeaderUrl('');
     const vars = extractVars(template);
     const nextMap = {};
     vars.forEach((key) => {
@@ -344,6 +305,17 @@ export default function Contacts() {
 
   const buildTemplateComponents = (contact) => {
     if (!selectedTemplate || !templateVariableKeys.length) return [];
+    const headerParameters = templateVariableKeys
+      .filter((key) => key.startsWith('header_'))
+      .sort((left, right) => Number(left.replace('header_', '')) - Number(right.replace('header_', '')))
+      .map((key) => {
+        const variable = templateVariables[key];
+        let value = variable?.value || '';
+        if (variable?.type === 'contact_name') value = contact?.name || contact?.wa_name || 'Customer';
+        if (variable?.type === 'contact_phone') value = contact?.phone || '';
+        if (variable?.type === 'contact_email') value = contact?.email || 'N/A';
+        return { type: 'text', text: value || `{{${key.replace('header_', '')}}}` };
+      });
     const bodyParameters = templateVariableKeys
       .filter((key) => !key.startsWith('header_'))
       .sort((left, right) => Number(left) - Number(right))
@@ -352,31 +324,13 @@ export default function Contacts() {
         let value = variable?.value || '';
         if (variable?.type === 'contact_name') value = contact?.name || contact?.wa_name || 'Customer';
         if (variable?.type === 'contact_phone') value = contact?.phone || '';
-        if (variable?.type === 'contact_email') value = contact?.email || '';
+        if (variable?.type === 'contact_email') value = contact?.email || 'N/A';
         return { type: 'text', text: value || `{{${key}}}` };
       });
-    return bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : [];
-  };
-
-  const queueFilesForLibrary = (files) => {
-    const nextFiles = Array.from(files || []).filter((file) => detectMediaAssetType(file) === mediaType);
-    if (!nextFiles.length) {
-      toast.error(`Please add ${mediaType} files for this picker.`);
-      return;
-    }
-    setQueuedFiles(nextFiles);
-    setShowLibrary(true);
-  };
-
-  const buildAssetsToSend = () => {
-    if (selectedAssets.length) return selectedAssets;
-    if (!mediaUrl.trim()) return [];
-    return [{
-      _id: `manual-${mediaType}-${mediaUrl}`,
-      asset_type: mediaType,
-      public_url: mediaUrl.trim(),
-      original_name: manualFilename.trim() || `${mediaType}-asset`,
-    }];
+    const components = [];
+    if (headerParameters.length) components.push({ type: 'header', parameters: headerParameters });
+    if (bodyParameters.length) components.push({ type: 'body', parameters: bodyParameters });
+    return components;
   };
 
   const sendToSelected = async () => {
@@ -384,17 +338,12 @@ export default function Contacts() {
       toast.error('Select at least one contact');
       return;
     }
-    if (sendMode === 'text' && !sendText.trim()) {
-      toast.error('Enter a message');
-      return;
-    }
-    if (sendMode === 'template' && !selectedTemplate) {
+    if (!selectedTemplate) {
       toast.error('Select a template');
       return;
     }
-    const assetsToSend = sendMode === 'media' ? buildAssetsToSend() : [];
-    if (sendMode === 'media' && !assetsToSend.length) {
-      toast.error('Choose media from the gallery or add a direct URL');
+    if (selectedTemplateHeaderFormat && !templateHeaderUrl.trim()) {
+      toast.error(`Template requires ${selectedTemplateHeaderFormat} header URL`);
       return;
     }
 
@@ -409,35 +358,15 @@ export default function Contacts() {
           continue;
         }
         try {
-          if (sendMode === 'text') {
-            await api.post('/meta/messages/send', { to: normalizedTo, text: sendText.trim() });
-            acceptedCount += 1;
-            continue;
-          }
-          if (sendMode === 'template') {
-            await api.post('/meta/messages/send-template', {
-              to: normalizedTo,
-              template_name: selectedTemplate.name,
-              language: selectedTemplate.language,
-              components: buildTemplateComponents(contact),
-            });
-            acceptedCount += 1;
-            continue;
-          }
-          for (const asset of assetsToSend) {
-            try {
-              await api.post('/meta/messages/send-media', {
-                to: normalizedTo,
-                type: asset.asset_type,
-                url: asset.public_url,
-                caption: asset.asset_type === 'audio' ? '' : mediaCaption.trim(),
-                filename: asset.asset_type === 'document' ? asset.original_name || manualFilename.trim() || 'document' : asset.original_name || undefined,
-              });
-              acceptedCount += 1;
-            } catch (error) {
-              failures.push({ error });
-            }
-          }
+          await api.post('/meta/messages/send-template', {
+            to: normalizedTo,
+            template_name: selectedTemplate.name,
+            language: selectedTemplate.language,
+            components: buildTemplateComponents(contact),
+            header_type: selectedTemplateHeaderFormat ? selectedTemplateHeaderFormat.toLowerCase() : undefined,
+            header_media_url: selectedTemplateHeaderFormat ? templateHeaderUrl.trim() : undefined,
+          });
+          acceptedCount += 1;
         } catch (error) {
           failures.push({ error });
         }
@@ -496,28 +425,99 @@ export default function Contacts() {
 
       <ContactImportWizard open={showImport} onClose={() => setShowImport(false)} onImported={() => fetchContacts(1)} defaultCountryCode={defaultCountryOption?.dialCode || '91'} />
 
-      <PortalModal open={showSend} onClose={() => setShowSend(false)} title="Send to Selected Contacts" subtitle="Use text, Meta templates, or gallery media for the contacts you selected." size="xl">
+      <PortalModal open={showSend} onClose={() => setShowSend(false)} title="Send to Selected Contacts" subtitle="Send Meta-approved templates to the contacts you selected." size="xl">
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr,0.8fr]">
           <div className="space-y-5">
-            <div className="rounded-2xl border border-gray-100 bg-white p-5">
-              <label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Message Type</label>
-              <div className="flex gap-2">{[{ key: 'text', label: 'Text', icon: Send }, { key: 'template', label: 'Meta Template', icon: FileText }, { key: 'media', label: 'Media Gallery', icon: Image }].map((item) => <button key={item.key} type="button" onClick={() => { setSendMode(item.key); if (item.key !== 'template') setSelectedTemplate(null); }} className={`flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all ${sendMode === item.key ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100'}`}><item.icon className="h-4 w-4" />{item.label}</button>)}</div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+              Meta Template mode enabled
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Selected Audience</label><div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"><span>{contact.wa_name || contact.name || contact.phone}</span><span className="text-emerald-500">{formatDisplayPhone(contact.phone, contact.country_code)}</span></div>)}</div></div>
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Selected Audience</label>
+              <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">
+                {selectedContacts.map((contact) => (
+                  <div key={contact._id} className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                    <span>{contact.wa_name || contact.name || contact.phone}</span>
+                    <span className="text-emerald-500">{formatDisplayPhone(contact.phone, contact.country_code)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-            {sendMode === 'text' ? <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Message</label><textarea value={sendText} onChange={(event) => setSendText(event.target.value)} placeholder="Type your message..." rows={6} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" /><div className="mt-2 flex items-center justify-between"><span className="text-xs text-gray-400">{sendText.length}/4096</span><div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-600"><AlertTriangle className="h-3.5 w-3.5" /><span>Requires 24h window</span></div></div></div> : null}
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-400">Select Meta-Approved Template</label>
+              <p className="mb-3 text-xs text-gray-400">Only Meta-approved templates appear here, pulled live from your connected account.</p>
+              {loadingTemplates ? (
+                <div className="space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-16 animate-pulse rounded-xl bg-gray-100" />)}</div>
+              ) : approvedTemplates.length === 0 ? (
+                <div className="py-8 text-center"><FileText className="mx-auto mb-2 h-10 w-10 text-gray-300" /><p className="text-sm text-gray-400">No approved templates on Meta</p></div>
+              ) : (
+                <div className="max-h-72 space-y-2 overflow-y-auto">
+                  {approvedTemplates.map((template) => {
+                    const vars = extractVars(template);
+                    return (
+                      <button key={template.id} type="button" onClick={() => handleSelectTemplate(template)} className={`w-full rounded-xl border-2 p-4 text-left transition-all ${selectedTemplate?.id === template.id ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}>
+                        <div className="mb-1 flex items-center justify-between"><span className="text-sm font-semibold text-gray-900">{template.name}</span><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase text-gray-600">{template.category}</span></div>
+                        <p className="text-xs text-gray-500">{template.language} • {vars.length ? `${vars.length} variable(s)` : 'No variables'}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
-            {sendMode === 'template' ? <><div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-400">Select Meta-Approved Template</label><p className="mb-3 text-xs text-gray-400">Only Meta-approved templates appear here, pulled live from your connected account.</p>{loadingTemplates ? <div className="space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-16 animate-pulse rounded-xl bg-gray-100" />)}</div> : approvedTemplates.length === 0 ? <div className="py-8 text-center"><FileText className="mx-auto mb-2 h-10 w-10 text-gray-300" /><p className="text-sm text-gray-400">No approved templates on Meta</p></div> : <div className="max-h-72 space-y-2 overflow-y-auto">{approvedTemplates.map((template) => { const vars = extractVars(template); return <button key={template.id} type="button" onClick={() => handleSelectTemplate(template)} className={`w-full rounded-xl border-2 p-4 text-left transition-all ${selectedTemplate?.id === template.id ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><div className="mb-1 flex items-center justify-between"><span className="text-sm font-semibold text-gray-900">{template.name}</span><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase text-gray-600">{template.category}</span></div><p className="text-xs text-gray-500">{template.language} • {vars.length ? `${vars.length} variable(s)` : 'No variables'}</p></button>; })}</div>}</div>{selectedTemplate && templateVariableKeys.length ? <div className="rounded-2xl border border-gray-100 bg-white p-5"><button type="button" onClick={() => setShowVariableConfig((current) => !current)} className="flex w-full items-center justify-between"><div className="text-left"><label className="text-xs font-semibold uppercase tracking-wider text-amber-600">Dynamic Variables ({templateVariableKeys.length})</label><p className="mt-0.5 text-xs text-gray-400">Configure what data to pass into the selected template.</p></div>{showVariableConfig ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}</button>{showVariableConfig ? <div className="mt-4 space-y-3">{templateVariableKeys.map((key) => <div key={key} className="rounded-xl bg-gray-50 p-3"><label className="mb-2 block text-xs font-semibold text-gray-600">{`{{${key}}}`}</label><div className="flex gap-2"><select value={templateVariables[key]?.type || 'static'} onChange={(event) => setTemplateVariables((current) => ({ ...current, [key]: { ...current[key], type: event.target.value } }))} className="w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"><option value="static">Static Value</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option></select>{templateVariables[key]?.type === 'static' ? <input value={templateVariables[key]?.value || ''} onChange={(event) => setTemplateVariables((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} placeholder="Enter value..." className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm" /> : <p className="flex flex-1 items-center px-3 text-xs text-emerald-600">Auto-filled from contact data</p>}</div></div>)}</div> : null}</div> : null}</> : null}
+            {selectedTemplate && templateVariableKeys.length ? (
+              <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                <button type="button" onClick={() => setShowVariableConfig((current) => !current)} className="flex w-full items-center justify-between">
+                  <div className="text-left">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-amber-600">Dynamic Variables ({templateVariableKeys.length})</label>
+                    <p className="mt-0.5 text-xs text-gray-400">Configure what data to pass into the selected template.</p>
+                  </div>
+                  {showVariableConfig ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                </button>
+                {showVariableConfig ? (
+                  <div className="mt-4 space-y-3">
+                    {templateVariableKeys.map((key) => (
+                      <div key={key} className="rounded-xl bg-gray-50 p-3">
+                        <label className="mb-2 block text-xs font-semibold text-gray-600">{`{{${key}}}`}</label>
+                        <div className="flex gap-2">
+                          <select value={templateVariables[key]?.type || 'static'} onChange={(event) => setTemplateVariables((current) => ({ ...current, [key]: { ...current[key], type: event.target.value } }))} className="w-40 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                            <option value="static">Static Value</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option>
+                          </select>
+                          {templateVariables[key]?.type === 'static' ? (
+                            <input value={templateVariables[key]?.value || ''} onChange={(event) => setTemplateVariables((current) => ({ ...current, [key]: { ...current[key], value: event.target.value } }))} placeholder="Enter value..." className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm" />
+                          ) : <p className="flex flex-1 items-center px-3 text-xs text-emerald-600">Auto-filled from contact data</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
-            {sendMode === 'media' ? <div className="rounded-2xl border border-gray-100 bg-white p-5"><label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">Media Gallery</label><div className="mb-4 grid grid-cols-4 gap-2">{MEDIA_OPTIONS.map((option) => <button key={option.key} type="button" onClick={() => { setMediaType(option.key); setSelectedAssets([]); setManualUrlOpen(false); setMediaUrl(''); setManualFilename(''); }} className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 transition-all ${mediaType === option.key ? 'border-emerald-300 bg-emerald-50' : 'border-gray-100 hover:border-gray-200'}`}><option.icon className="h-5 w-5" /><span className="text-xs font-medium">{option.label}</span></button>)}</div><div onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); queueFilesForLibrary(event.dataTransfer.files); }} className={`rounded-[28px] border-2 border-dashed p-5 transition-all ${dragActive ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-[#f7faf9]'}`}><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm"><FolderOpen className="h-6 w-6" /></div><h3 className="text-lg font-semibold text-gray-900">Choose from gallery</h3><p className="mt-1 text-sm text-gray-500">Upload to your own server library, then reuse those assets anywhere in the portal.</p></div><div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => setShowLibrary(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600"><FolderOpen className="h-4 w-4" />Open gallery</button><button type="button" onClick={() => setManualUrlOpen((current) => !current)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"><Link2 className="h-4 w-4" />Direct URL</button></div></div></div>{selectedAssets.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2">{selectedAssets.map((asset) => <div key={asset._id} className="overflow-hidden rounded-[24px] border border-gray-200 bg-white"><div className="relative">{renderAssetPreview(asset)}<button type="button" onClick={() => setSelectedAssets((current) => current.filter((item) => item._id !== asset._id))} className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow-sm"><X className="h-4 w-4" /></button></div><div className="p-4"><p className="truncate text-sm font-semibold text-gray-900">{asset.original_name}</p><p className="mt-1 text-xs text-gray-500">{formatFileSize(asset.size_bytes)} • {asset.asset_type}</p></div></div>)}</div> : null}{manualUrlOpen ? <div className="mt-4 space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Direct URL Fallback</p><input value={mediaUrl} onChange={(event) => setMediaUrl(event.target.value)} placeholder="Media URL (https://...)" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm" />{mediaType === 'document' ? <input value={manualFilename} onChange={(event) => setManualFilename(event.target.value)} placeholder="Filename (e.g. report.pdf)" className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm" /> : null}</div> : null}{mediaType !== 'audio' ? <input value={mediaCaption} onChange={(event) => setMediaCaption(event.target.value)} placeholder="Caption (optional)" className="mt-4 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm" /> : null}</div> : null}
+            {selectedTemplate && selectedTemplateHeaderFormat ? (
+              <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-blue-600">Header Media ({selectedTemplateHeaderFormat})</label>
+                <p className="mb-3 text-xs text-gray-400">This template needs a {selectedTemplateHeaderFormat.toLowerCase()} header file URL.</p>
+                <input value={templateHeaderUrl} onChange={(event) => setTemplateHeaderUrl(event.target.value)} placeholder="https://public-url-to-media-file" className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40" />
+                <button type="button" onClick={() => setShowTemplateHeaderLibrary(true)} className="mt-2 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"><FolderOpen className="h-3.5 w-3.5" />Choose from gallery</button>
+              </div>
+            ) : null}
 
-            <button type="button" onClick={sendToSelected} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">{sending ? <><div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />Sending via Meta...</> : <><Send className="h-4 w-4" />Send to Selected Contacts</>}</button>
+            <button type="button" onClick={sendToSelected} disabled={sending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
+              {sending ? <><div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />Sending via Meta...</> : <><Send className="h-4 w-4" />Send to Selected Contacts</>}
+            </button>
           </div>
-          <div className="space-y-5"><div className="rounded-2xl border border-gray-100 bg-white p-5"><div className="mb-4 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /><h3 className="text-sm font-semibold text-gray-900">Selected Contacts</h3></div><div className="max-h-[18rem] space-y-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p><p className="mt-1 text-xs text-gray-500">{formatDisplayPhone(contact.phone, contact.country_code)}</p></div>)}</div></div></div>
+
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <div className="mb-4 flex items-center gap-2"><Users className="h-4 w-4 text-gray-400" /><h3 className="text-sm font-semibold text-gray-900">Selected Contacts</h3></div>
+              <div className="max-h-[18rem] space-y-2 overflow-y-auto pr-1">{selectedContacts.map((contact) => <div key={contact._id} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"><p className="text-sm font-semibold text-gray-900">{contact.wa_name || contact.name || 'Unnamed'}</p><p className="mt-1 text-xs text-gray-500">{formatDisplayPhone(contact.phone, contact.country_code)}</p></div>)}</div>
+            </div>
+          </div>
         </div>
       </PortalModal>
 
-      <MediaLibraryModal open={showLibrary} onClose={() => { setShowLibrary(false); setQueuedFiles([]); }} title="Choose Media" subtitle={`Pick ${mediaType} assets from your server library, or upload new ones without leaving the composer.`} allowedTypes={[mediaType]} allowMultiple queuedFiles={queuedFiles} onQueuedFilesHandled={() => setQueuedFiles([])} onSelect={(assets) => { setSelectedAssets((current) => mergeAssets(current, assets)); setShowLibrary(false); setQueuedFiles([]); toast.success(`${assets.length} asset(s) selected`); }} />
+      <MediaLibraryModal open={showTemplateHeaderLibrary} onClose={() => setShowTemplateHeaderLibrary(false)} title="Select Header Media" subtitle="Pick a media file for the selected template header." allowedTypes={selectedTemplateHeaderFormat ? [selectedTemplateHeaderFormat.toLowerCase()] : ['document']} onSelect={(assets) => { const first = assets?.[0]; if (!first?.public_url) { toast.error('No valid media selected'); return; } setTemplateHeaderUrl(first.public_url); setShowTemplateHeaderLibrary(false); toast.success('Header media selected'); }} />
     </div>
   );
 }

@@ -107,6 +107,19 @@ const getVisibleMessageText = (message = {}) => {
   return raw;
 };
 
+const getFileNameFromUrl = (value = '') => {
+  const source = String(value || '').trim();
+  if (!source) return '';
+  try {
+    const parsed = new URL(source, window.location.origin);
+    const rawName = decodeURIComponent(parsed.pathname.split('/').pop() || '');
+    return rawName || '';
+  } catch {
+    const rawName = decodeURIComponent(source.split('?')[0].split('/').pop() || '');
+    return rawName || '';
+  }
+};
+
 function TemplateBubble({ message }) {
   const [showPreview, setShowPreview] = useState(false);
   const templateName = getTemplateName(message);
@@ -126,12 +139,13 @@ function TemplateBubble({ message }) {
     .find((param) => param?.image?.link || param?.video?.link || param?.document?.link);
   const headerLink = String(preview.header_link || '') || headerMedia?.image?.link || headerMedia?.video?.link || headerMedia?.document?.link || '';
   const headerType = String(preview.header_type || '') || headerMedia?.type || '';
+  const headerFileName = getFileNameFromUrl(headerLink);
   return (
     <div className="space-y-2">
       {headerLink ? (
         <button type="button" onClick={() => setShowPreview(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-600">
           <FileText className="h-4 w-4" />
-          {headerType ? `${String(headerType).toUpperCase()} attachment` : 'Attachment'}
+          {headerFileName || (headerType ? `${String(headerType).toUpperCase()} attachment` : 'Attachment')}
         </button>
       ) : null}
       {bodyText ? <p className="text-xs text-gray-700 mt-1 break-words">{bodyText}</p> : null}
@@ -140,7 +154,7 @@ function TemplateBubble({ message }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowPreview(false)}>
           <div className="w-full max-w-3xl rounded-2xl bg-white p-4" onClick={(event) => event.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3">
-              <p className="text-sm font-semibold text-gray-900 truncate">{templateName || 'Template attachment'}</p>
+              <p className="text-sm font-semibold text-gray-900 truncate">{headerFileName || templateName || 'Template attachment'}</p>
               <button type="button" onClick={() => setShowPreview(false)} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
             </div>
             {headerType.toLowerCase() === 'image' ? <img src={headerLink} alt={templateName || 'Template image'} className="max-h-[72vh] w-full rounded-xl object-contain" /> : null}
@@ -151,7 +165,7 @@ function TemplateBubble({ message }) {
                 <div className="flex items-center gap-3">
                   <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-gray-600"><FileText className="h-6 w-6" /></div>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{templateName || 'Template file'}</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{headerFileName || templateName || 'Template file'}</p>
                     <p className="text-xs text-gray-500">{headerType ? `${String(headerType).toUpperCase()} file` : 'Attachment'}</p>
                   </div>
                 </div>

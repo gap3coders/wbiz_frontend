@@ -18,7 +18,8 @@ export default function Campaigns() {
   const [allLabels, setAllLabels] = useState([]);
   const [creating, setCreating] = useState(false);
   const [showHeaderLibrary, setShowHeaderLibrary] = useState(false);
-  const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
+  const [activeHeaderRecipient, setActiveHeaderRecipient] = useState('');
+  const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});
 
   const fetch_ = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -42,7 +43,7 @@ export default function Campaigns() {
   }, [showDetail]);
 
   const openWiz = async () => {
-    setShowCreate(true); setStep(1); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
+    setShowCreate(true); setStep(1); setActiveHeaderRecipient(''); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});
     try {
       const [t,c] = await Promise.all([api.get('/meta/templates'), api.get('/contacts',{params:{limit:500}})]);
       setTemplates((t.data.data.templates||[]).filter(t=>t.status==='APPROVED'));
@@ -115,21 +116,45 @@ export default function Campaigns() {
         return;
       }
     }
-    if (headerMediaFormat && !String(form.header_media_url || '').trim()) {
-      toast.error(`Template requires ${headerMediaFormat.toUpperCase()} header media URL`);
-      return;
+      const selectedContactPhones = audiencePhonesForIndividual;
+    if (headerMediaFormat) {
+      if (form.header_media_mode === 'individual') {
+        if (!selectedContactPhones.length) {
+          toast.error('No audience contacts available for individual header media mapping');
+          return;
+        }
+        const missingPhone = selectedContactPhones.find((phone) => !String(form.header_media_by_contact?.[phone] || '').trim());
+        if (missingPhone) {
+          toast.error(`Select header media for contact ${missingPhone}`);
+          return;
+        }
+      } else if (!String(form.header_media_url || '').trim()) {
+        toast.error(`Template requires ${headerMediaFormat.toUpperCase()} header media URL`);
+        return;
+      }
     }
     setCreating(true);
     try {
+      const variableMapping = { ...(form.variable_mapping || {}) };
+      if (headerMediaFormat) {
+        variableMapping.__header_media_mode = form.header_media_mode || 'global';
+        variableMapping.__header_media_type = headerMediaFormat;
+        variableMapping.__header_media_global = String(form.header_media_url || '').trim();
+        variableMapping.__header_media_by_contact = { ...(form.header_media_by_contact || {}) };
+      }
+      const defaultHeaderLink = form.header_media_mode === 'individual'
+        ? String((selectedContactPhones.map((phone) => form.header_media_by_contact?.[phone]).find(Boolean)) || '')
+        : String(form.header_media_url || '').trim();
       const payload = {
         ...form,
-        template_components: headerMediaFormat && form.header_media_url?.trim()
+        variable_mapping: variableMapping,
+        template_components: headerMediaFormat && defaultHeaderLink
           ? [{
               type: 'header',
               parameters: [
                 {
                   type: headerMediaFormat,
-                  [headerMediaFormat]: { link: form.header_media_url.trim() },
+                  [headerMediaFormat]: { link: defaultHeaderLink },
                 },
               ],
             }]
@@ -158,6 +183,12 @@ export default function Campaigns() {
   const toggleTag = t => setForm(f=>({...f,target_tags:f.target_tags.includes(t)?f.target_tags.filter(x=>x!==t):[...f.target_tags,t]}));
   const selectAll = () => setForm(f=>({...f,recipients:contacts.filter(c=>c.opt_in!==false).map(c=>c.phone)}));
   const filteredContacts = form.target_type==='tags' ? contacts.filter(c=>c.opt_in!==false && c.labels?.some(l=>form.target_tags.includes(l))) : contacts.filter(c=>c.opt_in!==false);
+  const audienceContacts = form.target_type === 'all'
+    ? contacts.filter((c) => c.opt_in !== false)
+    : form.target_type === 'tags'
+      ? contacts.filter((c) => c.opt_in !== false && c.labels?.some((l) => form.target_tags.includes(l)))
+      : contacts.filter((c) => form.recipients.includes(c.phone));
+  const audiencePhonesForIndividual = audienceContacts.map((c) => c.phone).filter(Boolean);
 
   return (
     <div className="p-6 sm:p-8 max-w-7xl mx-auto">
@@ -217,23 +248,35 @@ export default function Campaigns() {
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Select Meta-Approved Template</label>
               {templates.length===0?<p className="text-sm text-gray-400 text-center py-8">No approved templates</p>
               :<div className="space-y-2 max-h-60 overflow-y-auto">{templates.map(t=>{const vars=extractVars(t.name);return(
-                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{},template_components:[],header_media_url:''});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
+                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
               )})}</div>}
               {headerMediaFormat ? (
                 <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
                   <p className="text-xs font-semibold text-blue-700 mb-2">Header Media ({headerMediaFormat.toUpperCase()})</p>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button type="button" onClick={() => setForm((prev) => ({ ...prev, header_media_mode: 'global' }))} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${form.header_media_mode === 'global' ? 'bg-white border-blue-300 text-blue-700' : 'border-transparent text-gray-500 bg-blue-100/60'}`}>One file for all</button>
+                    <button type="button" onClick={() => setForm((prev) => ({ ...prev, header_media_mode: 'individual' }))} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${form.header_media_mode === 'individual' ? 'bg-white border-blue-300 text-blue-700' : 'border-transparent text-gray-500 bg-blue-100/60'}`}>Different per contact</button>
+                  </div>
+                  {form.header_media_mode === 'individual' ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-blue-700">Per-contact media can be assigned in Step 3 for all audience types.</p>
+                      <button type="button" onClick={() => setStep(3)} className="px-2 py-1 text-[11px] font-semibold rounded border border-blue-200 bg-white text-blue-700 hover:bg-blue-50">Go to Step 3</button>
+                    </div>
+                  ) : (
                   <input
                     value={form.header_media_url || ''}
                     onChange={(event) => setForm((prev) => ({ ...prev, header_media_url: event.target.value }))}
                     placeholder={`Public ${headerMediaFormat} URL`}
                     className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
                   />
+                  )}
                   <button
                     type="button"
-                    onClick={() => setShowHeaderLibrary(true)}
+                    onClick={() => { setActiveHeaderRecipient(''); setShowHeaderLibrary(true); }}
+                    disabled={form.header_media_mode === 'individual'}
                     className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
                   >
-                    Choose from gallery
+                    {form.header_media_mode === 'individual' ? 'Use per-contact gallery in Step 3' : 'Choose from gallery'}
                   </button>
                 </div>
               ) : null}
@@ -282,6 +325,30 @@ export default function Campaigns() {
                   </button>
                 ))}</div>
               </div>}
+              {headerMediaFormat && form.header_media_mode==='individual' ? (
+                <div className="mt-3 p-3 rounded-xl border border-blue-100 bg-blue-50">
+                  <p className="text-xs font-semibold text-blue-700 mb-2">Per-contact Header Media ({audienceContacts.length} contacts)</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {audienceContacts.map((contact) => {
+                      const phone = contact.phone;
+                      return (
+                      <div key={phone} className="flex items-center gap-2 rounded-lg border border-blue-100 bg-white px-2 py-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-700 truncate">{contact?.name || contact?.wa_name || phone}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{phone}</p>
+                          <input
+                            value={form.header_media_by_contact?.[phone] || ''}
+                            onChange={(event) => setForm((prev) => ({ ...prev, header_media_by_contact: { ...(prev.header_media_by_contact || {}), [phone]: event.target.value } }))}
+                            placeholder={`URL for ${phone}`}
+                            className="mt-1 w-full text-[11px] bg-gray-50 border border-gray-200 rounded px-2 py-1"
+                          />
+                        </div>
+                        <button type="button" onClick={() => { setActiveHeaderRecipient(phone); setShowHeaderLibrary(true); }} className="px-2 py-1 text-[11px] font-semibold rounded border border-gray-200 bg-gray-50 hover:bg-gray-100">Gallery</button>
+                      </div>
+                    )})}
+                  </div>
+                </div>
+              ) : null}
             </div>}
 
             {step===4&&<div className="space-y-3">
@@ -314,8 +381,17 @@ export default function Campaigns() {
             toast.error('No valid media selected');
             return;
           }
-          setForm((current) => ({ ...current, header_media_url: first.public_url }));
+          setForm((current) => {
+            if (activeHeaderRecipient) {
+              return {
+                ...current,
+                header_media_by_contact: { ...(current.header_media_by_contact || {}), [activeHeaderRecipient]: first.public_url },
+              };
+            }
+            return { ...current, header_media_url: first.public_url };
+          });
           setShowHeaderLibrary(false);
+          setActiveHeaderRecipient('');
           toast.success('Header media selected');
         }}
       />
