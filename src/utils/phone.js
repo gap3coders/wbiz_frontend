@@ -33,7 +33,28 @@ const DIAL_CODES_SORTED = Array.from(new Set(COUNTRY_PHONE_OPTIONS.map((item) =>
   (a, b) => b.length - a.length
 );
 
-export const digitsOnly = (value = '') => String(value || '').replace(/[^\d]/g, '');
+const expandScientificNotation = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!/[eE]/.test(raw)) return raw;
+  const match = raw.match(/^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/);
+  if (!match) return raw;
+  const sign = match[1] || '';
+  const intPart = match[2] || '';
+  const fracPart = match[3] || '';
+  const exponent = Number.parseInt(match[4], 10);
+  if (!Number.isFinite(exponent)) return raw;
+  const digits = `${intPart}${fracPart}`;
+  const decimalPosition = intPart.length + exponent;
+  if (decimalPosition <= 0) {
+    return `${sign}0.${'0'.repeat(Math.abs(decimalPosition))}${digits}`;
+  }
+  if (decimalPosition >= digits.length) {
+    return `${sign}${digits}${'0'.repeat(decimalPosition - digits.length)}`;
+  }
+  return `${sign}${digits.slice(0, decimalPosition)}.${digits.slice(decimalPosition)}`;
+};
+
+export const digitsOnly = (value = '') => expandScientificNotation(value).replace(/[^\d]/g, '');
 export const normalizeCountryCode = (value = '') => digitsOnly(value).replace(/^0+/, '');
 export const normalizeNationalNumber = (value = '') => digitsOnly(value);
 

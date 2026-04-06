@@ -158,6 +158,9 @@ export default function ContactImportWizard({ open, onClose, onImported, default
   const [dragActive, setDragActive] = useState(false);
   const [importReport, setImportReport] = useState(null);
   const [defaultDialCode, setDefaultDialCode] = useState(defaultCountryCode || '91');
+  const [bulkCountryCode, setBulkCountryCode] = useState(defaultCountryCode || '91');
+  const [bulkCountryOverrides, setBulkCountryOverrides] = useState({});
+  const [applyingBulkCountry, setApplyingBulkCountry] = useState(false);
 
   useEffect(() => {
     if (open) return;
@@ -171,6 +174,9 @@ export default function ContactImportWizard({ open, onClose, onImported, default
     setDragActive(false);
     setImportReport(null);
     setDefaultDialCode(defaultCountryCode || '91');
+    setBulkCountryCode(defaultCountryCode || '91');
+    setBulkCountryOverrides({});
+    setApplyingBulkCountry(false);
   }, [open]);
 
   const mappedRows = useMemo(() => buildMappedRows(rawRows, mapping, defaultDialCode), [rawRows, mapping, defaultDialCode]);
@@ -256,6 +262,8 @@ export default function ContactImportWizard({ open, onClose, onImported, default
         contacts: mappedRows.map(({ ok, error, ...row }) => row),
       });
       setImportReport(data.data);
+      setBulkCountryCode(defaultDialCode || defaultCountryCode || '91');
+      setBulkCountryOverrides({});
       setStep('result');
       onImported?.();
       toast.success(`Imported ${data.data.imported} contact(s)`);
@@ -267,6 +275,40 @@ export default function ContactImportWizard({ open, onClose, onImported, default
   };
 
   const stepIndex = getStepIndex(step);
+  const importedPhones = useMemo(
+    () =>
+      (importReport?.results || [])
+        .filter((row) => ['created', 'updated'].includes(String(row.status || '').toLowerCase()) && row.phone)
+        .map((row) => String(row.phone || '').replace(/[^\d]/g, '')),
+    [importReport]
+  );
+  const needsCountryFix = useMemo(() => {
+    const normalizedDefault = String(bulkCountryCode || '').replace(/[^\d]/g, '');
+    if (!normalizedDefault || !importedPhones.length) return false;
+    return importedPhones.some((phone) => !String(phone || '').startsWith(normalizedDefault));
+  }, [importedPhones, bulkCountryCode]);
+
+  const applyBulkCountryFix = async () => {
+    if (!importedPhones.length) {
+      toast.error('No imported phones available for country code update');
+      return;
+    }
+    setApplyingBulkCountry(true);
+    try {
+      const { data } = await api.post('/contacts/maintenance/bulk-country-code', {
+        phones: importedPhones,
+        default_country_code: bulkCountryCode,
+        overrides: bulkCountryOverrides,
+      });
+      const report = data?.data || {};
+      toast.success(`Country code update done. Updated ${report.updated || 0}, skipped ${report.skipped || 0}.`);
+      onImported?.();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to apply bulk country code');
+    } finally {
+      setApplyingBulkCountry(false);
+    }
+  };
 
   return (
     <PortalModal
@@ -468,6 +510,43 @@ export default function ContactImportWizard({ open, onClose, onImported, default
                   </table>
                 </div>
               </div>
+
+              <div className="mt-4 overflow-hidden rounded-2xl border border-emerald-100">
+                <div className="bg-emerald-50 px-4 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Normalized Phone Preview</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[46rem]">
+                    <thead className="bg-white">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Row</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Input</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Country</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Local</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Final Phone</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mappedRows.slice(0, 8).map((row) => {
+                        const rawInput = mapping.phone !== IGNORE_OPTION
+                          ? String(rawRows.find((item) => item.__rowNumber === row.row_number)?.[mapping.phone] || '')
+                          : `${String(rawRows.find((item) => item.__rowNumber === row.row_number)?.[mapping.country_code] || '')} ${String(rawRows.find((item) => item.__rowNumber === row.row_number)?.[mapping.phone_number] || '')}`.trim();
+                        return (
+                          <tr key={`mapped-preview-${row.row_number}`} className="border-t border-gray-100">
+                            <td className="px-4 py-2 text-xs font-semibold text-gray-500">{row.row_number}</td>
+                            <td className="px-4 py-2 text-xs text-gray-700">{rawInput || '—'}</td>
+                            <td className="px-4 py-2 text-xs text-gray-700">{row.country_code ? `+${row.country_code}` : '—'}</td>
+                            <td className="px-4 py-2 text-xs text-gray-700">{row.phone_number || '—'}</td>
+                            <td className="px-4 py-2 text-xs font-semibold text-gray-800">{row.phone || '—'}</td>
+                            <td className="px-4 py-2 text-xs">{row.ok ? <span className="text-emerald-600 font-semibold">OK</span> : <span className="text-amber-600 font-semibold">{row.error || 'Review'}</span>}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         ) : null}
@@ -586,6 +665,60 @@ export default function ContactImportWizard({ open, onClose, onImported, default
             </div>
 
             <div className="rounded-[28px] border border-gray-100 bg-white p-5">
+              {needsCountryFix ? <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Country Code Fix</p>
+                <p className="mt-1 text-xs text-blue-700">If your source file mixed phone formats, bulk-apply a default code and optionally override specific contacts.</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-[220px_1fr]">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-blue-700">Default country code</label>
+                    <select
+                      value={bulkCountryCode}
+                      onChange={(event) => setBulkCountryCode(event.target.value)}
+                      className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-gray-700"
+                    >
+                      {COUNTRY_PHONE_OPTIONS.map((option) => (
+                        <option key={`bulk-${option.iso2}-${option.dialCode}`} value={option.dialCode}>
+                          +{option.dialCode} ({option.country})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="max-h-28 overflow-y-auto rounded-xl border border-blue-100 bg-white px-3 py-2">
+                    {importedPhones.slice(0, 20).map((phone) => (
+                      <div key={`bulk-row-${phone}`} className="mb-2 grid grid-cols-[1fr,140px] gap-2 last:mb-0">
+                        <p className="truncate text-xs text-gray-700">{phone}</p>
+                        <select
+                          value={bulkCountryOverrides[phone] || ''}
+                          onChange={(event) =>
+                            setBulkCountryOverrides((current) => ({
+                              ...current,
+                              [phone]: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-xs"
+                        >
+                          <option value="">Use default</option>
+                          {COUNTRY_PHONE_OPTIONS.map((option) => (
+                            <option key={`override-${phone}-${option.iso2}`} value={option.dialCode}>
+                              +{option.dialCode}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={applyBulkCountryFix}
+                  disabled={applyingBulkCountry}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {applyingBulkCountry ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {applyingBulkCountry ? 'Applying...' : 'Apply Country Code Update'}
+                </button>
+              </div> : null}
+
               <div className="mb-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Import Results</p>
                 <h3 className="mt-1 text-lg font-semibold text-gray-900">Row-by-row outcome</h3>

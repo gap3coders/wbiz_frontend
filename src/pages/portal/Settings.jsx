@@ -54,6 +54,7 @@ export default function SettingsPage() {
   const [verifyPin, setVerifyPin] = useState('');
   const [deletingPhoneId, setDeletingPhoneId] = useState(null);
   const [runningPhoneMigration, setRunningPhoneMigration] = useState(false);
+  const [clearingTenantData, setClearingTenantData] = useState(false);
   const devError = (...args) => {
     if (import.meta.env.DEV) console.error(...args);
   };
@@ -272,6 +273,25 @@ export default function SettingsPage() {
     }
   };
 
+  const clearTenantData = async () => {
+    const confirmation = window.prompt('Type CLEAR to wipe contacts, chats, campaigns, gallery files, and logs.');
+    if (String(confirmation || '').trim().toUpperCase() !== 'CLEAR') {
+      toast.error('Cleanup cancelled. Confirmation text mismatch.');
+      return;
+    }
+    setClearingTenantData(true);
+    try {
+      const { data } = await api.post('/meta/maintenance/clear-tenant-data', { confirm_text: 'CLEAR' });
+      const report = data?.data || {};
+      toast.success(`Data cleared. Contacts ${report.contacts || 0}, chats ${report.messages || 0}, campaigns ${report.campaigns || 0}.`);
+    } catch (e) {
+      const err = e.response?.data;
+      toast.error(err?.error || 'Failed to clear tenant data');
+    } finally {
+      setClearingTenantData(false);
+    }
+  };
+
   const qc = (r) => {
     if (r === 'green') return 'text-emerald-600 bg-emerald-50';
     if (r === 'yellow') return 'text-amber-600 bg-amber-50';
@@ -377,6 +397,18 @@ export default function SettingsPage() {
               {runningPhoneMigration ? <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-700 rounded-full animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               {runningPhoneMigration ? 'Running...' : 'Run Contact Phone Migration'}
             </button>
+            <div className="mt-5 pt-5 border-t border-gray-100">
+              <h4 className="font-semibold text-red-700 mb-1">Danger Zone</h4>
+              <p className="text-xs text-gray-500 mb-3">Wipes contacts, conversations, messages, campaigns, gallery assets, and logs. WhatsApp account connection stays linked.</p>
+              <button
+                onClick={clearTenantData}
+                disabled={clearingTenantData}
+                className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-700 text-sm font-semibold rounded-xl hover:bg-red-100 disabled:opacity-60"
+              >
+                {clearingTenantData ? <div className="w-4 h-4 border-2 border-red-300 border-t-red-700 rounded-full animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {clearingTenantData ? 'Clearing data...' : 'Clear All Tenant Data'}
+              </button>
+            </div>
           </div>
         </div>
       )}
