@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import MediaLibraryModal from '../../MediaLibraryModal';
-import { detectMediaAssetType, formatFileSize } from '../../mediaLibraryHelpers';
+import { detectMediaAssetType, fileToDataUrl, formatFileSize } from '../../mediaLibraryHelpers';
 import {
   AlertCircle,
   ArrowLeft,
@@ -108,12 +108,58 @@ const getVisibleMessageText = (message = {}) => {
 };
 
 function TemplateBubble({ message }) {
+  const [showPreview, setShowPreview] = useState(false);
   const templateName = getTemplateName(message);
+  const preview = message?.template_params?.preview || {};
+  const components = Array.isArray(message?.template_params?.components) ? message.template_params.components : [];
+  const bodyFromParams = components
+    .filter((item) => String(item?.type || '').toLowerCase() === 'body')
+    .flatMap((item) => item.parameters || [])
+    .map((param) => String(param?.text || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const templateBodyText = String(preview.template_body_text || '').trim();
+  const bodyText = String(preview.body_text || '').trim() || bodyFromParams || templateBodyText || String(message.content || '').replace(/^\[Template:\s*.+\]$/i, '').trim();
+  const headerMedia = components
+    .filter((item) => String(item?.type || '').toLowerCase() === 'header')
+    .flatMap((item) => item.parameters || [])
+    .find((param) => param?.image?.link || param?.video?.link || param?.document?.link);
+  const headerLink = String(preview.header_link || '') || headerMedia?.image?.link || headerMedia?.video?.link || headerMedia?.document?.link || '';
+  const headerType = String(preview.header_type || '') || headerMedia?.type || '';
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Template</p>
-      <p className="text-sm font-medium text-gray-900 mt-1 break-words">{templateName || 'WhatsApp template message'}</p>
-      <p className="text-xs text-gray-500 mt-1">Sent using a Meta-approved WhatsApp template.</p>
+    <div className="space-y-2">
+      {headerLink ? (
+        <button type="button" onClick={() => setShowPreview(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-600">
+          <FileText className="h-4 w-4" />
+          {headerType ? `${String(headerType).toUpperCase()} attachment` : 'Attachment'}
+        </button>
+      ) : null}
+      {bodyText ? <p className="text-xs text-gray-700 mt-1 break-words">{bodyText}</p> : null}
+      {!bodyText && templateName ? <p className="text-xs text-gray-600 break-words">{templateName}</p> : null}
+      {showPreview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowPreview(false)}>
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-4" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3">
+              <p className="text-sm font-semibold text-gray-900 truncate">{templateName || 'Template attachment'}</p>
+              <button type="button" onClick={() => setShowPreview(false)} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            {headerType.toLowerCase() === 'image' ? <img src={headerLink} alt={templateName || 'Template image'} className="max-h-[72vh] w-full rounded-xl object-contain" /> : null}
+            {headerType.toLowerCase() === 'video' ? <video src={headerLink} controls className="max-h-[72vh] w-full rounded-xl bg-black" /> : null}
+            {headerType.toLowerCase() === 'audio' ? <audio src={headerLink} controls className="w-full" /> : null}
+            {!['image', 'video', 'audio'].includes(headerType.toLowerCase()) ? (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-gray-600"><FileText className="h-6 w-6" /></div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{templateName || 'Template file'}</p>
+                    <p className="text-xs text-gray-500">{headerType ? `${String(headerType).toUpperCase()} file` : 'Attachment'}</p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -122,6 +168,7 @@ function MediaBubble({ message }) {
   const [resolvedUrl, setResolvedUrl] = useState(message.media_url || '');
   const [loading, setLoading] = useState(Boolean(!message.media_url && message.media_id));
   const [loadError, setLoadError] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -172,30 +219,35 @@ function MediaBubble({ message }) {
 
   const text = getVisibleMessageText(message);
   const fileLabel = message.media_filename || `${message.message_type || 'file'}`;
+  const fileExtension = String(fileLabel.split('.').pop() || '').toUpperCase();
 
   return (
     <div className="space-y-2">
       {loading ? <div className="h-40 rounded-xl bg-gray-100 animate-pulse" /> : null}
 
       {!loading && message.message_type === 'image' && resolvedUrl ? (
-        <a href={resolvedUrl} target="_blank" rel="noreferrer" className="block">
+        <button type="button" onClick={() => setShowPreview(true)} className="block w-full text-left">
           <img src={resolvedUrl} alt={text || 'Shared image'} className="max-h-72 w-full rounded-xl object-cover border border-black/5" />
-        </a>
+        </button>
       ) : null}
 
       {!loading && message.message_type === 'video' && resolvedUrl ? (
-        <video src={resolvedUrl} controls className="max-h-72 w-full rounded-xl bg-black" />
+        <button type="button" onClick={() => setShowPreview(true)} className="block w-full text-left">
+          <video src={resolvedUrl} controls className="max-h-72 w-full rounded-xl bg-black" />
+        </button>
       ) : null}
 
       {!loading && message.message_type === 'audio' && resolvedUrl ? (
-        <audio src={resolvedUrl} controls className="w-full" />
+        <div className="rounded-xl border border-gray-200 bg-white/80 p-3">
+          <p className="mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Audio</p>
+          <audio src={resolvedUrl} controls className="w-full" />
+        </div>
       ) : null}
 
       {!loading && message.message_type === 'document' ? (
-        <a
-          href={resolvedUrl || message.media_url || '#'}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => setShowPreview(true)}
           className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white/70 px-3 py-3"
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100 text-gray-600">
@@ -203,15 +255,41 @@ function MediaBubble({ message }) {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{fileLabel}</p>
-            <p className="text-xs text-gray-500">Open document</p>
+            <p className="text-xs text-gray-500">{fileExtension ? `${fileExtension} document` : 'Document file'}</p>
           </div>
-        </a>
+        </button>
       ) : null}
 
       {loadError ? <p className="text-xs text-red-500">{loadError}</p> : null}
       {text ? <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{text}</p> : null}
       {!loading && !resolvedUrl && !loadError && message.message_type !== 'document' ? (
         <p className="text-xs text-gray-500 capitalize">{message.message_type} attached</p>
+      ) : null}
+
+      {showPreview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowPreview(false)}>
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-4" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3">
+              <p className="text-sm font-semibold text-gray-900 truncate">{fileLabel}</p>
+              <button type="button" onClick={() => setShowPreview(false)} className="rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            {message.message_type === 'image' && resolvedUrl ? <img src={resolvedUrl} alt={fileLabel} className="max-h-[72vh] w-full rounded-xl object-contain" /> : null}
+            {message.message_type === 'video' && resolvedUrl ? <video src={resolvedUrl} controls className="max-h-[72vh] w-full rounded-xl bg-black" /> : null}
+            {message.message_type === 'audio' && resolvedUrl ? <audio src={resolvedUrl} controls className="w-full" /> : null}
+            {message.message_type === 'document' ? (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white text-gray-600"><FileText className="h-6 w-6" /></div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{fileLabel}</p>
+                    <p className="text-xs text-gray-500">{fileExtension ? `${fileExtension} file` : 'Document file'}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-gray-500">Document preview is not available for this format.</p>
+              </div>
+            ) : null}
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -309,6 +387,7 @@ export default function Inbox() {
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [composerDragActive, setComposerDragActive] = useState(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
 
   const listSignatureRef = useRef('');
   const msgSignatureRef = useRef('');
@@ -322,6 +401,8 @@ export default function Inbox() {
   const endRef = useRef(null);
   const textareaRef = useRef(null);
   const composerToolsRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingChunksRef = useRef([]);
 
   const selectedConversation = conversations.find((item) => item.contact_phone === selectedPhone) || null;
   const currentDisplayName =
@@ -584,6 +665,63 @@ export default function Inbox() {
 
   const removeSelectedAsset = (assetId) => {
     setSelectedAssets((current) => current.filter((asset) => asset._id !== assetId));
+  };
+
+  const stopAudioRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    if (recorder.state !== 'inactive') recorder.stop();
+  };
+
+  const startAudioRecording = async () => {
+    if (isRecordingAudio) {
+      stopAudioRecording();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const chunks = recordingChunksRef.current;
+        recordingChunksRef.current = [];
+        stream.getTracks().forEach((track) => track.stop());
+        setIsRecordingAudio(false);
+        if (!chunks.length) return;
+        try {
+          const blobMime = String(recorder.mimeType || 'audio/webm').trim() || 'audio/webm';
+          const extension = blobMime.includes('ogg') ? 'ogg' : blobMime.includes('mp4') ? 'm4a' : 'webm';
+          const blob = new Blob(chunks, { type: blobMime });
+          const file = new File([blob], `voice-note-${Date.now()}.${extension}`, { type: blob.type || blobMime });
+          const dataUrl = await fileToDataUrl(file);
+          const { data } = await api.post('/media/assets/upload', {
+            data_url: dataUrl,
+            original_name: file.name,
+            mime_type: file.type,
+          });
+          const asset = data?.data?.asset;
+          if (!asset?.public_url) throw new Error('Uploaded audio URL missing');
+          setMediaMode('audio');
+          setSelectedAssets([asset]);
+          setMediaCaption('');
+          toast.success('Voice note ready. Tap send.');
+        } catch (error) {
+          toast.error(error?.response?.data?.error || 'Failed to process voice note');
+        }
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecordingAudio(true);
+      toast('Recording... tap mic again to stop', { icon: '🎙️' });
+    } catch {
+      toast.error('Microphone permission denied or unavailable');
+    }
   };
 
   const insertEmoji = (emoji) => {
@@ -1197,13 +1335,25 @@ export default function Inbox() {
                       />
                     </div>
 
+                    {isRecordingAudio ? (
+                      <div className="mr-1 inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-600">
+                        <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                        <span className="inline-flex items-end gap-0.5">
+                          <span className="h-2 w-0.5 rounded bg-red-400 animate-pulse" />
+                          <span className="h-3 w-0.5 rounded bg-red-500 animate-pulse" />
+                          <span className="h-2 w-0.5 rounded bg-red-400 animate-pulse" />
+                        </span>
+                        REC
+                      </div>
+                    ) : null}
+
                     <button
-                      onClick={text.trim() ? sendMessage : () => openLibraryForType('audio')}
+                      onClick={text.trim() ? sendMessage : startAudioRecording}
                       disabled={sending}
-                      aria-label={text.trim() ? 'Send message' : 'Choose audio'}
+                      aria-label={text.trim() ? 'Send message' : isRecordingAudio ? 'Stop recording' : 'Record audio'}
                       className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-all ${text.trim() ? 'bg-[#1faa61] text-white shadow-lg shadow-emerald-500/25 hover:bg-[#189c55]' : 'bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800'}`}
                     >
-                      {sending ? <div className={`h-4 w-4 animate-spin rounded-full border-2 ${text.trim() ? 'border-white/30 border-t-white' : 'border-gray-300 border-t-gray-600'}`} /> : text.trim() ? <Send className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                      {sending ? <div className={`h-4 w-4 animate-spin rounded-full border-2 ${text.trim() ? 'border-white/30 border-t-white' : 'border-gray-300 border-t-gray-600'}`} /> : text.trim() ? <Send className="h-4 w-4" /> : <Mic className={`h-4 w-4 ${isRecordingAudio ? 'text-red-500' : ''}`} />}
                     </button>
                   </div>
                   </div>

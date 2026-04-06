@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -71,7 +71,7 @@ const renderAssetPreview = (asset) => {
 
 export default function NewMessage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('text');
+  const [mode, setMode] = useState('template');
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -83,6 +83,8 @@ export default function NewMessage() {
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateVariables, setTemplateVariables] = useState({});
   const [showVariableConfig, setShowVariableConfig] = useState(false);
+  const [templateHeaderUrl, setTemplateHeaderUrl] = useState('');
+  const [showTemplateHeaderLibrary, setShowTemplateHeaderLibrary] = useState(false);
   const [mediaType, setMediaType] = useState('image');
   const [selectedAssets, setSelectedAssets] = useState([]);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -127,6 +129,7 @@ export default function NewMessage() {
 
   const handleSelectTemplate = (template) => {
     setSelectedTemplate(template);
+    setTemplateHeaderUrl('');
     const vars = extractVars(template);
     const nextMap = {};
     vars.forEach((key) => {
@@ -139,6 +142,17 @@ export default function NewMessage() {
   const buildTemplateComponents = () => {
     if (!selectedTemplate || !templateVariableKeys.length) return [];
     const matchedContact = contacts.find((contact) => contact.phone === to.replace(/[^0-9]/g, ''));
+    const headerParameters = templateVariableKeys
+      .filter((key) => key.startsWith('header_'))
+      .sort((left, right) => Number(left.replace('header_', '')) - Number(right.replace('header_', '')))
+      .map((key) => {
+        const variable = templateVariables[key];
+        let value = variable.value;
+        if (variable.type === 'contact_name') value = matchedContact?.name || 'Customer';
+        if (variable.type === 'contact_phone') value = to.replace(/[^0-9]/g, '');
+        if (variable.type === 'contact_email') value = matchedContact?.email || 'N/A';
+        return { type: 'text', text: value || `{{${key.replace('header_', '')}}}` };
+      });
     const bodyParameters = templateVariableKeys
       .filter((key) => !key.startsWith('header_'))
       .sort((left, right) => Number(left) - Number(right))
@@ -151,8 +165,19 @@ export default function NewMessage() {
         return { type: 'text', text: value || `{{${key}}}` };
       });
 
-    return bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : [];
+    const components = [];
+    if (headerParameters.length) components.push({ type: 'header', parameters: headerParameters });
+    if (bodyParameters.length) components.push({ type: 'body', parameters: bodyParameters });
+    return components;
   };
+
+  const selectedTemplateHeaderFormat = useMemo(() => {
+    const header = selectedTemplate?.components?.find((component) => component.type === 'HEADER');
+    const format = String(header?.format || '').toUpperCase();
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) return '';
+    return format;
+  }, [selectedTemplate]);
+  const templateHeaderLibraryType = selectedTemplateHeaderFormat ? selectedTemplateHeaderFormat.toLowerCase() : '';
 
   const previewText = () => {
     if (!selectedTemplate) return '';
@@ -234,12 +259,19 @@ export default function NewMessage() {
           setSending(false);
           return;
         }
+        if (selectedTemplateHeaderFormat && !templateHeaderUrl.trim()) {
+          toast.error(`Template requires ${selectedTemplateHeaderFormat} header URL`);
+          setSending(false);
+          return;
+        }
 
         const response = await api.post('/meta/messages/send-template', {
           to: normalizedTo,
           template_name: selectedTemplate.name,
           language: selectedTemplate.language,
           components: buildTemplateComponents(),
+          header_type: selectedTemplateHeaderFormat ? selectedTemplateHeaderFormat.toLowerCase() : undefined,
+          header_media_url: selectedTemplateHeaderFormat ? templateHeaderUrl.trim() : undefined,
         });
         devLog('[Portal Messaging][Meta Accepted][Template]', response.data?.data || {});
         toast.success('Accepted by Meta. Delivery still depends on WhatsApp callback updates.');
@@ -316,40 +348,14 @@ export default function NewMessage() {
         <div className="mb-6 animate-fade-in-up">
           <h1 className="font-display mb-1 text-2xl font-bold text-gray-900">New Message</h1>
           <p className="text-sm text-gray-500">
-            Send text, templates, and gallery-backed media from one branded WhatsApp workspace.
+            Send Meta-approved WhatsApp templates with dynamic variables and media headers.
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr,390px]">
           <div className="space-y-5 animate-fade-in-up">
-            <div className="rounded-2xl border border-gray-100 bg-white p-5">
-              <label className="mb-3 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                Message Type
-              </label>
-              <div className="flex gap-2">
-                {[
-                  { key: 'text', label: 'Text', icon: Send },
-                  { key: 'template', label: 'Meta Template', icon: FileText },
-                  { key: 'media', label: 'Media Gallery', icon: Image },
-                ].map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => {
-                      setMode(item.key);
-                      if (item.key !== 'template') setSelectedTemplate(null);
-                    }}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all ${
-                      mode === item.key
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-xs font-semibold uppercase tracking-wider text-emerald-700">
+              Meta Template mode enabled
             </div>
 
             <div className="rounded-2xl border border-gray-100 bg-white p-5">
@@ -552,6 +558,31 @@ export default function NewMessage() {
                         ))}
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+
+                {selectedTemplate && selectedTemplateHeaderFormat ? (
+                  <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-blue-600">
+                      Header Media ({selectedTemplateHeaderFormat})
+                    </label>
+                    <p className="mb-3 text-xs text-gray-400">
+                      This template needs a {selectedTemplateHeaderFormat.toLowerCase()} header file URL.
+                    </p>
+                    <input
+                      value={templateHeaderUrl}
+                      onChange={(event) => setTemplateHeaderUrl(event.target.value)}
+                      placeholder="https://public-url-to-media-file"
+                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplateHeaderLibrary(true)}
+                      className="mt-2 inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" />
+                      Choose from gallery
+                    </button>
                   </div>
                 ) : null}
               </>
@@ -851,6 +882,23 @@ export default function NewMessage() {
           setShowLibrary(false);
           setQueuedFiles([]);
           toast.success(`${assets.length} asset(s) selected`);
+        }}
+      />
+      <MediaLibraryModal
+        open={showTemplateHeaderLibrary}
+        onClose={() => setShowTemplateHeaderLibrary(false)}
+        title="Select Header Media"
+        subtitle="Pick a media file for the selected template header."
+        allowedTypes={templateHeaderLibraryType ? [templateHeaderLibraryType] : ['document']}
+        onSelect={(assets) => {
+          const first = assets?.[0];
+          if (!first?.public_url) {
+            toast.error('No valid media selected');
+            return;
+          }
+          setTemplateHeaderUrl(first.public_url);
+          setShowTemplateHeaderLibrary(false);
+          toast.success('Header media selected');
         }}
       />
     </>

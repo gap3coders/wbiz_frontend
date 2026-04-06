@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { Megaphone, Plus, Play, Trash2, CheckCircle2, Clock, XCircle, X, FileText, ArrowRight, RefreshCw, Send, Pause, Calendar, Tag, Users, AlertTriangle, Eye, ChevronDown, ChevronUp } from 'lucide-react';
+import MediaLibraryModal from '../../MediaLibraryModal';
 
 const SC={draft:{color:'bg-gray-100 text-gray-600',icon:FileText},scheduled:{color:'bg-blue-50 text-blue-700',icon:Clock},running:{color:'bg-amber-50 text-amber-700',icon:Play},paused:{color:'bg-orange-50 text-orange-700',icon:Pause},completed:{color:'bg-emerald-50 text-emerald-700',icon:CheckCircle2},failed:{color:'bg-red-50 text-red-700',icon:XCircle}};
 
@@ -16,6 +17,7 @@ export default function Campaigns() {
   const [contacts, setContacts] = useState([]);
   const [allLabels, setAllLabels] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [showHeaderLibrary, setShowHeaderLibrary] = useState(false);
   const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:''});
 
   const fetch_ = async (silent = false) => {
@@ -226,6 +228,13 @@ export default function Campaigns() {
                     placeholder={`Public ${headerMediaFormat} URL`}
                     className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowHeaderLibrary(true)}
+                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Choose from gallery
+                  </button>
                 </div>
               ) : null}
               {form.template_name && extractVars(form.template_name).length>0 && (
@@ -293,6 +302,23 @@ export default function Campaigns() {
           </div>
         </div></div>
       )}
+      <MediaLibraryModal
+        open={showHeaderLibrary}
+        onClose={() => setShowHeaderLibrary(false)}
+        title="Select Header Media"
+        subtitle="Pick a server file for campaign template header."
+        allowedTypes={headerMediaFormat ? [headerMediaFormat] : ['document']}
+        onSelect={(assets) => {
+          const first = assets?.[0];
+          if (!first?.public_url) {
+            toast.error('No valid media selected');
+            return;
+          }
+          setForm((current) => ({ ...current, header_media_url: first.public_url }));
+          setShowHeaderLibrary(false);
+          toast.success('Header media selected');
+        }}
+      />
     </div>
   );
 }

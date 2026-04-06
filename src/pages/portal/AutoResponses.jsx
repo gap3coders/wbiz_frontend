@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Clock3,
   Edit3,
+  FolderOpen,
   Info,
   Plus,
   RefreshCw,
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import api from '../../api/axios';
 import PortalModal from '../../components/Portal/PortalModal';
+import MediaLibraryModal from '../../MediaLibraryModal';
 
 const TRIGGER_OPTIONS = [
   { value: 'keyword', label: 'Keyword Reply', hint: 'Reply when inbound text matches one or more keywords.' },
@@ -80,6 +82,8 @@ const emptyForm = {
   text_body: 'Hi {{contact_name}}, thanks for your message. Our team will get back to you shortly.',
   template_name: '',
   template_language: 'en',
+  template_header_type: 'none',
+  template_header_media_url: '',
   template_variables: {},
   business_hours: {
     timezone: 'Asia/Kolkata',
@@ -108,6 +112,7 @@ export default function AutoResponses() {
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [showTemplateVars, setShowTemplateVars] = useState(true);
+  const [showTemplateHeaderLibrary, setShowTemplateHeaderLibrary] = useState(false);
 
   const approvedTemplates = useMemo(
     () => templates.filter((template) => template.status === 'APPROVED'),
@@ -191,6 +196,8 @@ export default function AutoResponses() {
       text_body: rule.text_body || '',
       template_name: rule.template_name || '',
       template_language: rule.template_language || 'en',
+      template_header_type: String(rule.template_header_type || 'none'),
+      template_header_media_url: String(rule.template_header_media_url || ''),
       template_variables: templateVariables,
       business_hours: {
         timezone: rule.business_hours?.timezone || 'Asia/Kolkata',
@@ -882,6 +889,49 @@ export default function AutoResponses() {
                       />
                     </div>
                   </div>
+                  <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                        Header media
+                      </label>
+                      <select
+                        value={form.template_header_type}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, template_header_type: event.target.value }))
+                        }
+                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
+                      >
+                        <option value="none">None</option>
+                        <option value="image">Image</option>
+                        <option value="video">Video</option>
+                        <option value="document">Document</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+                        Header media URL
+                      </label>
+                      <input
+                        value={form.template_header_media_url}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, template_header_media_url: event.target.value }))
+                        }
+                        disabled={form.template_header_type === 'none'}
+                        placeholder="https://public-url-to-media-file"
+                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 disabled:cursor-not-allowed disabled:bg-gray-100"
+                      />
+                      {form.template_header_type !== 'none' ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowTemplateHeaderLibrary(true)}
+                          className="mt-2 inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          Choose from gallery
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
 
                   <button
                     type="button"
@@ -1055,6 +1105,23 @@ export default function AutoResponses() {
           </div>
         </div>
       </PortalModal>
+      <MediaLibraryModal
+        open={showTemplateHeaderLibrary}
+        onClose={() => setShowTemplateHeaderLibrary(false)}
+        title="Select Header Media"
+        subtitle="Pick a file for auto-response template header."
+        allowedTypes={form.template_header_type !== 'none' ? [form.template_header_type] : ['document']}
+        onSelect={(assets) => {
+          const first = assets?.[0];
+          if (!first?.public_url) {
+            toast.error('No valid media selected');
+            return;
+          }
+          setForm((current) => ({ ...current, template_header_media_url: first.public_url }));
+          setShowTemplateHeaderLibrary(false);
+          toast.success('Header media selected');
+        }}
+      />
     </>
   );
 }
