@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, CheckCircle2, XCircle, Loader2, ArrowRight, MessageSquare } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle2, XCircle, Loader2, User, Mail, Phone, Building2, Lock, Globe, MessageCircle } from 'lucide-react';
 import { COUNTRY_PHONE_OPTIONS, detectDefaultCountryOption, parsePhoneInput } from '../utils/phone';
 
 const INDUSTRIES = [
@@ -39,7 +39,6 @@ export default function Register() {
     setForm((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  // Debounced email uniqueness check
   useEffect(() => {
     if (!form.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       setEmailAvailable(null);
@@ -60,7 +59,6 @@ export default function Register() {
     return () => clearTimeout(emailTimeout.current);
   }, [form.email]);
 
-  // Password strength
   const pwStrength = (() => {
     const p = form.password;
     if (!p) return { score: 0, label: '', color: '' };
@@ -73,7 +71,7 @@ export default function Register() {
       { label: 'Weak', color: 'bg-red-500' },
       { label: 'Fair', color: 'bg-orange-500' },
       { label: 'Good', color: 'bg-yellow-500' },
-      { label: 'Strong', color: 'bg-emerald-500' },
+      { label: 'Strong', color: 'bg-brand-500' },
     ];
     return { score, ...(levels[score - 1] || { label: '', color: '' }) };
   })();
@@ -133,197 +131,196 @@ export default function Register() {
     };
   }, []);
 
+  const inputCls = 'w-full px-3.5 py-2.5 rounded-lg border border-surface-200 bg-white text-sm text-gray-900 placeholder-surface-400 transition-all focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+  const selectCls = inputCls;
+  const labelCls = 'block text-sm font-semibold text-gray-900 mb-2';
+
   return (
-    <div className="min-h-screen flex">
-      {/* Left panel — branding */}
-      <div className="hidden lg:flex lg:w-[480px] xl:w-[540px] bg-brand-gradient flex-col justify-between p-10 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-20 -left-10 w-72 h-72 bg-white/20 rounded-full blur-3xl" />
-          <div className="absolute bottom-20 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
-        </div>
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-white font-display font-bold text-xl">WhatsApp SaaS</span>
-          </div>
-          <h1 className="text-white font-display text-4xl font-bold leading-tight mb-4">
-            Connect your business<br />to WhatsApp
-          </h1>
-          <p className="text-emerald-100 text-lg leading-relaxed max-w-md">
-            Start messaging your customers on WhatsApp in minutes. Live chat, bulk campaigns, templates, and analytics — all in one platform.
-          </p>
-        </div>
-        <div className="relative z-10 flex items-center gap-6 text-emerald-200 text-sm">
-          <span>14-day free trial</span>
-          <span className="w-1 h-1 rounded-full bg-emerald-300" />
-          <span>No credit card required</span>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-surface-50 via-white to-brand-50/30 flex items-center justify-center p-4 py-8">
+      {/* Subtle background pattern */}
+      <div className="absolute inset-0 opacity-30 pointer-events-none">
+        <div className="absolute top-20 left-10 w-72 h-72 bg-brand-100 rounded-full blur-3xl" />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-emerald-100 rounded-full blur-3xl" />
       </div>
 
-      {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 overflow-y-auto">
-        <div className="w-full max-w-lg animate-fade-in-up">
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-display font-bold text-lg text-gray-900">WhatsApp SaaS</span>
+      <div className="w-full max-w-[420px] relative z-10">
+        {/* Logo and branding */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-brand-500 to-emerald-600 rounded-xl mb-4">
+            <span className="text-white font-bold text-xl">W</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">WBIZ.IN</h1>
+          <p className="text-sm text-surface-600">WhatsApp Business Platform</p>
+        </div>
+
+        {/* Auth card */}
+        <div className="bg-white rounded-2xl shadow-card border border-surface-200 p-8 mb-6">
+          {/* Form header */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Create your account</h2>
+            <p className="text-sm text-surface-600">Get started with your 14-day free trial</p>
           </div>
 
-          <h2 className="font-display text-2xl font-bold text-gray-900 mb-1">Create your account</h2>
-          <p className="text-gray-500 mb-8">Get started with your 14-day free trial</p>
-
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Name + Email */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Full name *</label>
+            {/* Full name */}
+            <div>
+              <label className={labelCls}>Full name</label>
+              <div className="relative">
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
                 <input name="full_name" value={form.full_name} onChange={handleChange} required minLength={2}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="John Doe" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Work email *</label>
-                <div className="relative">
-                  <input name="email" type="email" value={form.email} onChange={handleChange} required
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm pr-10 transition-all hover:border-gray-300" placeholder="you@company.com" />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    {emailChecking && <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />}
-                    {!emailChecking && emailAvailable === true && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                    {!emailChecking && emailAvailable === false && <XCircle className="w-4 h-4 text-red-500" />}
-                  </div>
-                </div>
-                {emailAvailable === false && <p className="text-xs text-red-500 mt-1">This email is already registered</p>}
+                  className={`${inputCls} pl-10`} placeholder="John Doe" />
               </div>
             </div>
 
-            {/* Passwords */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Password *</label>
-                <div className="relative">
-                  <input name="password" type={showPassword ? 'text' : 'password'} value={form.password} onChange={handleChange} required minLength={8}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm pr-10 transition-all hover:border-gray-300" placeholder="Min 8 characters" />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+            {/* Email */}
+            <div>
+              <label className={labelCls}>Work email</label>
+              <div className="relative">
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input name="email" type="email" value={form.email} onChange={handleChange} required
+                  className={`${inputCls} pl-10 pr-10`} placeholder="you@company.com" />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {emailChecking && <Loader2 className="w-4 h-4 text-surface-400 animate-spin" />}
+                  {!emailChecking && emailAvailable === true && <CheckCircle2 className="w-4 h-4 text-brand-500" />}
+                  {!emailChecking && emailAvailable === false && <XCircle className="w-4 h-4 text-red-500" />}
                 </div>
-                {form.password && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden flex gap-0.5">
-                      {[1, 2, 3, 4].map((i) => (
-                        <div key={i} className={`flex-1 rounded-full transition-all ${i <= pwStrength.score ? pwStrength.color : 'bg-gray-200'}`} />
-                      ))}
-                    </div>
-                    <span className="text-xs text-gray-500">{pwStrength.label}</span>
-                  </div>
-                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm password *</label>
-                <div className="relative">
-                  <input name="confirm_password" type={showConfirm ? 'text' : 'password'} value={form.confirm_password} onChange={handleChange} required
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm pr-10 transition-all hover:border-gray-300" placeholder="Repeat password" />
-                  <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                    {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                {form.confirm_password && form.password !== form.confirm_password && (
-                  <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
-                )}
-              </div>
+              {emailAvailable === false && <p className="text-xs text-red-500 mt-1.5">Already registered</p>}
             </div>
 
-            {/* Phone + Company */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone number *</label>
-                <div className="grid grid-cols-[150px,1fr] gap-2">
-                  <select
-                    name="phone_country_code"
-                    value={form.phone_country_code}
-                    onChange={handleChange}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300"
-                  >
-                    {COUNTRY_PHONE_OPTIONS.map((option) => (
-                      <option key={`${option.iso2}-${option.dialCode}`} value={option.dialCode}>
-                        {option.country} (+{option.dialCode})
-                      </option>
-                    ))}
-                  </select>
+            {/* Phone number */}
+            <div>
+              <label className={labelCls}>Phone number</label>
+              <div className="flex gap-2">
+                <select name="phone_country_code" value={form.phone_country_code} onChange={handleChange} className={`${selectCls} flex-shrink-0 w-[80px] text-center`}>
+                  {COUNTRY_PHONE_OPTIONS.map((option) => (
+                    <option key={`${option.iso2}-${option.dialCode}`} value={option.dialCode}>
+                      +{option.dialCode}
+                    </option>
+                  ))}
+                </select>
+                <div className="relative flex-1">
+                  <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
                   <input name="phone_number" type="tel" value={form.phone_number} onChange={(event) => setForm((prev) => ({ ...prev, phone_number: event.target.value.replace(/[^\d]/g, ''), phone: `${prev.phone_country_code}${event.target.value.replace(/[^\d]/g, '')}` }))} required
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="9876543210" />
+                    className={`${inputCls} pl-10`} placeholder="9876543210" />
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Company name *</label>
-                <input name="company_name" value={form.company_name} onChange={handleChange} required
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="Acme Inc." />
               </div>
             </div>
 
-            {/* Country + Industry */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Company name */}
+            <div>
+              <label className={labelCls}>Company name</label>
+              <div className="relative">
+                <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input name="company_name" value={form.company_name} onChange={handleChange} required
+                  className={`${inputCls} pl-10`} placeholder="Acme Inc." />
+              </div>
+            </div>
+
+            {/* Country and Industry */}
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Country *</label>
-                <select name="country" value={form.country} onChange={handleChange} required
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300">
+                <label className={labelCls}>Country</label>
+                <select name="country" value={form.country} onChange={handleChange} required className={selectCls}>
                   {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Industry</label>
-                <select name="industry" value={form.industry} onChange={handleChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300">
-                  <option value="">Select industry...</option>
+                <label className={labelCls}>Industry</label>
+                <select name="industry" value={form.industry} onChange={handleChange} className={selectCls}>
+                  <option value="">Select...</option>
                   {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
                 </select>
               </div>
             </div>
 
-            {/* WhatsApp number (optional) */}
+            {/* WhatsApp number */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">WhatsApp Business number <span className="text-gray-400">(optional)</span></label>
-              <div className="grid grid-cols-[150px,1fr] gap-2">
-                <select
-                  name="whatsapp_country_code"
-                  value={form.whatsapp_country_code}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300"
-                >
+              <label className={labelCls}>WhatsApp Business number <span className="text-surface-400 font-normal">(optional)</span></label>
+              <div className="flex gap-2">
+                <select name="whatsapp_country_code" value={form.whatsapp_country_code} onChange={handleChange} className={`${selectCls} flex-shrink-0 w-[80px] text-center`}>
                   {COUNTRY_PHONE_OPTIONS.map((option) => (
                     <option key={`wa-${option.iso2}-${option.dialCode}`} value={option.dialCode}>
-                      {option.country} (+{option.dialCode})
+                      +{option.dialCode}
                     </option>
                   ))}
                 </select>
-                <input name="whatsapp_phone_number" type="tel" value={form.whatsapp_phone_number} onChange={(event) => setForm((prev) => ({ ...prev, whatsapp_phone_number: event.target.value.replace(/[^\d]/g, ''), whatsapp_number: `${prev.whatsapp_country_code}${event.target.value.replace(/[^\d]/g, '')}` }))}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="9876543210" />
+                <div className="relative flex-1">
+                  <MessageCircle className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                  <input name="whatsapp_phone_number" type="tel" value={form.whatsapp_phone_number} onChange={(event) => setForm((prev) => ({ ...prev, whatsapp_phone_number: event.target.value.replace(/[^\d]/g, ''), whatsapp_number: `${prev.whatsapp_country_code}${event.target.value.replace(/[^\d]/g, '')}` }))}
+                    className={`${inputCls} pl-10`} placeholder="9876543210" />
+                </div>
               </div>
             </div>
 
-            {/* Terms */}
-            <label className="flex items-start gap-3 cursor-pointer group">
+            {/* Password */}
+            <div>
+              <label className={labelCls}>Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input name="password" type={showPassword ? 'text' : 'password'} value={form.password} onChange={handleChange} required minLength={8}
+                  className={`${inputCls} pl-10 pr-10`} placeholder="Min 8 characters" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 p-1 transition-colors">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {form.password && (
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-surface-100 rounded-full overflow-hidden flex gap-0.5">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className={`flex-1 rounded-full transition-all ${i <= pwStrength.score ? pwStrength.color : 'bg-surface-200'}`} />
+                    ))}
+                  </div>
+                  <span className="text-xs text-surface-600 font-medium">{pwStrength.label}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <label className={labelCls}>Confirm password</label>
+              <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input name="confirm_password" type={showConfirm ? 'text' : 'password'} value={form.confirm_password} onChange={handleChange} required
+                  className={`${inputCls} pl-10 pr-10`} placeholder="Repeat password" />
+                <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 p-1 transition-colors">
+                  {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {form.confirm_password && form.password !== form.confirm_password && (
+                <p className="text-xs text-red-500 mt-1.5">Passwords do not match</p>
+              )}
+            </div>
+
+            {/* Terms checkbox */}
+            <label className="flex items-start gap-2 cursor-pointer py-1">
               <input type="checkbox" name="terms" checked={form.terms} onChange={handleChange}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
-              <span className="text-sm text-gray-600 group-hover:text-gray-800">
-                I agree to the <a href="/terms" className="text-emerald-600 font-medium hover:underline">Terms of Service</a> and{' '}
-                <a href="/privacy" className="text-emerald-600 font-medium hover:underline">Privacy Policy</a>
+                className="w-4 h-4 rounded border border-surface-200 text-brand-600 bg-white focus:ring-1 focus:ring-brand-500 cursor-pointer mt-0.5" />
+              <span className="text-xs text-surface-600 leading-relaxed">
+                I agree to the <a href="/terms" className="text-brand-600 font-medium hover:underline">Terms of Service</a> and{' '}
+                <a href="/privacy" className="text-brand-600 font-medium hover:underline">Privacy Policy</a>
               </span>
             </label>
 
             {/* Submit */}
             <button type="submit" disabled={loading || emailAvailable === false}
-              className="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-600/20">
-              {loading ? <span className="spinner" /> : <><span>Create Account</span><ArrowRight className="w-4 h-4" /></>}
+              className="w-full py-2.5 px-4 mt-2 bg-brand-600 hover:bg-brand-700 disabled:bg-surface-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2">
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Creating account...</span>
+                </>
+              ) : (
+                'Create Account'
+              )}
             </button>
           </form>
-
-          <p className="text-center text-sm text-gray-500 mt-6">
-            Already have an account? <Link to="/login" className="text-emerald-600 font-semibold hover:underline">Sign in</Link>
-          </p>
         </div>
+
+        {/* Footer link */}
+        <p className="text-center text-sm text-surface-600">
+          Already have an account? <Link to="/login" className="text-brand-600 font-semibold hover:text-brand-700 transition-colors">Sign in</Link>
+        </p>
       </div>
     </div>
   );

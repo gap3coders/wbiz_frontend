@@ -1,400 +1,321 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
-import { Megaphone, Plus, Play, Trash2, CheckCircle2, Clock, XCircle, X, FileText, ArrowRight, RefreshCw, Send, Pause, Calendar, Tag, Users, AlertTriangle, Eye, ChevronDown, ChevronUp } from 'lucide-react';
-import MediaLibraryModal from '../../MediaLibraryModal';
+import {
+  Megaphone, Plus, Play, Trash2, CheckCircle2, Clock, XCircle,
+  RefreshCw, Send, Pause, Eye, RotateCcw, AlertTriangle,
+  FileText, Users, Search, ChevronRight, TrendingUp,
+} from 'lucide-react';
 
-const SC={draft:{color:'bg-gray-100 text-gray-600',icon:FileText},scheduled:{color:'bg-blue-50 text-blue-700',icon:Clock},running:{color:'bg-amber-50 text-amber-700',icon:Play},paused:{color:'bg-orange-50 text-orange-700',icon:Pause},completed:{color:'bg-emerald-50 text-emerald-700',icon:CheckCircle2},failed:{color:'bg-red-50 text-red-700',icon:XCircle}};
+import { CAMPAIGN_STATUS_MAP as STATUS_MAP, getStatus, DEFAULT_STATUS } from '../../constants/statusMaps';
+
+const STATUS_TABS = [
+  { key: 'all', label: 'All' },
+  { key: 'running', label: 'Active' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'failed', label: 'Failed' },
+];
 
 export default function Campaigns() {
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showDetail, setShowDetail] = useState(null);
-  const [detailData, setDetailData] = useState(null);
-  const [step, setStep] = useState(1);
-  const [templates, setTemplates] = useState([]);
-  const [contacts, setContacts] = useState([]);
-  const [allLabels, setAllLabels] = useState([]);
-  const [creating, setCreating] = useState(false);
-  const [showHeaderLibrary, setShowHeaderLibrary] = useState(false);
-  const [activeHeaderRecipient, setActiveHeaderRecipient] = useState('');
-  const [form, setForm] = useState({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});
+  const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
 
-  const fetch_ = async (silent = false) => {
-    if (!silent) setLoading(true);
+  const fetchCampaigns = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true); else setRefreshing(true);
     try {
-      const {data}=await api.get('/campaigns');
-      setCampaigns(data.data.campaigns||[]);
-    } catch(e){
-      if (!silent) toast.error('Failed');
-    } finally{
-      if (!silent) setLoading(false);
+      const { data } = await api.get('/campaigns');
+      setCampaigns(data.data.campaigns || []);
+    } catch {
+      if (!silent) toast.error('Failed to load campaigns');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  };
-  useEffect(()=>{fetch_();},[]);
+  }, []);
+
+  useEffect(() => { fetchCampaigns(); }, [fetchCampaigns]);
+
+  /* Auto-refresh every 5s */
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      fetch_(true);
-      if (showDetail) fetchDetail(showDetail);
-    }, 3000);
-    return () => window.clearInterval(intervalId);
-  }, [showDetail]);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchCampaigns(true);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [fetchCampaigns]);
 
-  const openWiz = async () => {
-    setShowCreate(true); setStep(1); setActiveHeaderRecipient(''); setForm({name:'',template_name:'',template_language:'en',target_type:'selected',target_tags:[],recipients:[],scheduled_at:'',variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});
-    try {
-      const [t,c] = await Promise.all([api.get('/meta/templates'), api.get('/contacts',{params:{limit:500}})]);
-      setTemplates((t.data.data.templates||[]).filter(t=>t.status==='APPROVED'));
-      setContacts(c.data.data.contacts||[]);
-      setAllLabels(c.data.data.labels||[]);
-    } catch(e){toast.error('Failed to load data');}
+  /* Actions */
+  const launchCampaign = async (id) => {
+    if (!window.confirm('Launch this campaign? Messages will be sent via Meta API immediately.')) return;
+    try { await api.post(`/campaigns/${id}/launch`); toast.success('Campaign launched!'); fetchCampaigns(); } catch { toast.error('Failed to launch'); }
+  };
+  const rerunCampaign = async (id) => {
+    if (!window.confirm('Rerun this campaign now?')) return;
+    try { await api.post(`/campaigns/${id}/rerun`); toast.success('Rerun started'); fetchCampaigns(); } catch { toast.error('Failed to rerun'); }
+  };
+  const deleteCampaign = async (id) => {
+    if (!window.confirm('Delete this campaign?')) return;
+    try { await api.delete(`/campaigns/${id}`); toast.success('Campaign deleted'); fetchCampaigns(); } catch { toast.error('Failed to delete'); }
   };
 
-  const fetchDetail = async (id) => {
-    try { const {data}=await api.get(`/campaigns/${id}`); setDetailData(data.data); setShowDetail(id); } catch(e){toast.error('Failed');}
-  };
-
-  // Extract template variables
-  const extractVars = (tplName) => {
-    const tpl = templates.find(t=>t.name===tplName);
-    if (!tpl) return [];
-    const vars = [];
-    for (const comp of (tpl.components||[])) {
-      const slot = String(comp.type || '').toUpperCase();
-      if (!['BODY', 'HEADER'].includes(slot) || !comp.text) continue;
-      (comp.text.match(/\{\{(\d+)\}\}/g)||[]).forEach((match) => {
-        const n = match.replace(/[{}]/g,'');
-        const token = { key: `${slot.toLowerCase()}_${n}`, slot: slot.toLowerCase(), index: n };
-        if (!vars.some((item) => item.key === token.key)) vars.push(token);
-      });
+  /* Filtering */
+  const filteredCampaigns = useMemo(() => {
+    let list = statusFilter === 'all' ? campaigns : campaigns.filter(c => c.status === statusFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(c => c.name?.toLowerCase().includes(q) || c.template_name?.toLowerCase().includes(q));
     }
-    return vars;
-  };
+    return list;
+  }, [campaigns, statusFilter, search]);
 
-  const selectedTemplate = templates.find((item) => item.name === form.template_name) || null;
-  const headerMediaFormat = (() => {
-    const header = (selectedTemplate?.components || []).find((component) => String(component.type || '').toUpperCase() === 'HEADER');
-    const format = String(header?.format || '').toUpperCase();
-    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(format)) return '';
-    return format.toLowerCase();
-  })();
+  /* KPI counts */
+  const counts = useMemo(() => ({
+    total: campaigns.length,
+    running: campaigns.filter(c => c.status === 'running').length,
+    completed: campaigns.filter(c => c.status === 'completed').length,
+    scheduled: campaigns.filter(c => c.status === 'scheduled').length,
+    failed: campaigns.filter(c => c.status === 'failed').length,
+  }), [campaigns]);
 
-  const variableConfigFor = (tokenKey) => {
-    const current = form.variable_mapping?.[tokenKey];
-    if (!current) return { source: 'custom', value: '' };
-    if (typeof current === 'string') return { source: current === 'static' ? 'custom' : current, value: '' };
-    return { source: current.source || 'custom', value: current.value || '' };
-  };
+  const totalSent = campaigns.reduce((s, c) => s + (c.stats?.sent || 0), 0);
 
-  const setVariableConfig = (tokenKey, nextPatch) => {
-    setForm((prev) => {
-      const current = prev.variable_mapping?.[tokenKey];
-      const normalized = typeof current === 'string'
-        ? { source: current === 'static' ? 'custom' : current, value: '' }
-        : { source: 'custom', value: '', ...(current || {}) };
-      return {
-        ...prev,
-        variable_mapping: {
-          ...(prev.variable_mapping || {}),
-          [tokenKey]: { ...normalized, ...nextPatch },
-        },
-      };
-    });
-  };
+  const kpis = [
+    { label: 'Total Campaigns', value: counts.total, icon: Megaphone, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', sub: 'all time' },
+    { label: 'Active', value: counts.running, icon: Play, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', sub: 'running now' },
+    { label: 'Completed', value: counts.completed, icon: CheckCircle2, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100', sub: 'finished' },
+    { label: 'Scheduled', value: counts.scheduled, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', sub: 'upcoming' },
+    { label: 'Failed', value: counts.failed, icon: XCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', sub: 'needs attention' },
+    { label: 'Messages Sent', value: totalSent.toLocaleString(), icon: Send, color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100', sub: 'total delivered' },
+  ];
 
-  const handleCreate = async () => {
-    if(!form.name||!form.template_name){toast.error('Name & template required');return;}
-    if(form.target_type==='selected'&&form.recipients.length===0){toast.error('Select recipients');return;}
-    if(form.target_type==='tags'&&form.target_tags.length===0){toast.error('Select tags');return;}
-    const requiredVars = extractVars(form.template_name);
-    for (const token of requiredVars) {
-      const config = variableConfigFor(token.key);
-      if (config.source === 'custom' && !String(config.value || '').trim()) {
-        toast.error(`Add value for ${token.slot.toUpperCase()} variable {{${token.index}}}`);
-        return;
-      }
-    }
-      const selectedContactPhones = audiencePhonesForIndividual;
-    if (headerMediaFormat) {
-      if (form.header_media_mode === 'individual') {
-        if (!selectedContactPhones.length) {
-          toast.error('No audience contacts available for individual header media mapping');
-          return;
-        }
-        const missingPhone = selectedContactPhones.find((phone) => !String(form.header_media_by_contact?.[phone] || '').trim());
-        if (missingPhone) {
-          toast.error(`Select header media for contact ${missingPhone}`);
-          return;
-        }
-      } else if (!String(form.header_media_url || '').trim()) {
-        toast.error(`Template requires ${headerMediaFormat.toUpperCase()} header media URL`);
-        return;
-      }
-    }
-    setCreating(true);
-    try {
-      const variableMapping = { ...(form.variable_mapping || {}) };
-      if (headerMediaFormat) {
-        variableMapping.__header_media_mode = form.header_media_mode || 'global';
-        variableMapping.__header_media_type = headerMediaFormat;
-        variableMapping.__header_media_global = String(form.header_media_url || '').trim();
-        variableMapping.__header_media_by_contact = { ...(form.header_media_by_contact || {}) };
-      }
-      const defaultHeaderLink = form.header_media_mode === 'individual'
-        ? String((selectedContactPhones.map((phone) => form.header_media_by_contact?.[phone]).find(Boolean)) || '')
-        : String(form.header_media_url || '').trim();
-      const payload = {
-        ...form,
-        variable_mapping: variableMapping,
-        template_components: headerMediaFormat && defaultHeaderLink
-          ? [{
-              type: 'header',
-              parameters: [
-                {
-                  type: headerMediaFormat,
-                  [headerMediaFormat]: { link: defaultHeaderLink },
-                },
-              ],
-            }]
-          : [],
-      };
-      const { data } = await api.post('/campaigns',payload);
-      if (data?.data?.launch === 'started') toast.success('Campaign published and started now.');
-      else toast.success('Campaign scheduled successfully.');
-      setShowCreate(false);
-      fetch_();
-    }
-    catch(e){const err=e.response?.data; toast.error(err?.error_source==='meta'?`Meta Error: ${err.error}`:`Platform: ${err?.error||'Failed'}`);} finally{setCreating(false);}
-  };
-
-  const launch = async id => {
-    if(!window.confirm('Launch? Messages sent via Meta API immediately.')) return;
-    try { await api.post(`/campaigns/${id}/launch`); toast.success('Launched!'); fetch_(); } catch(e){toast.error('Failed');}
-  };
-  const rerun = async id => {
-    if(!window.confirm('Rerun this campaign now?')) return;
-    try { await api.post(`/campaigns/${id}/rerun`); toast.success('Rerun started'); fetch_(); } catch(e){toast.error('Failed');}
-  };
-
-  const del = async id => { if(!window.confirm('Delete?')) return; try { await api.delete(`/campaigns/${id}`); toast.success('Deleted'); if(showDetail===id) setShowDetail(null); fetch_(); } catch(e){toast.error('Failed');} };
-  const toggle = p => setForm(f=>({...f,recipients:f.recipients.includes(p)?f.recipients.filter(x=>x!==p):[...f.recipients,p]}));
-  const toggleTag = t => setForm(f=>({...f,target_tags:f.target_tags.includes(t)?f.target_tags.filter(x=>x!==t):[...f.target_tags,t]}));
-  const selectAll = () => setForm(f=>({...f,recipients:contacts.filter(c=>c.opt_in!==false).map(c=>c.phone)}));
-  const filteredContacts = form.target_type==='tags' ? contacts.filter(c=>c.opt_in!==false && c.labels?.some(l=>form.target_tags.includes(l))) : contacts.filter(c=>c.opt_in!==false);
-  const audienceContacts = form.target_type === 'all'
-    ? contacts.filter((c) => c.opt_in !== false)
-    : form.target_type === 'tags'
-      ? contacts.filter((c) => c.opt_in !== false && c.labels?.some((l) => form.target_tags.includes(l)))
-      : contacts.filter((c) => form.recipients.includes(c.phone));
-  const audiencePhonesForIndividual = audienceContacts.map((c) => c.phone).filter(Boolean);
+  /* Skeleton */
+  const Skel = ({ h = 'h-32' }) => <div className={`bg-white rounded-xl border border-surface-200 ${h} animate-pulse`} />;
 
   return (
-    <div className="p-6 sm:p-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6 animate-fade-in-up">
-        <div><h1 className="font-display text-2xl font-bold text-gray-900">Campaigns</h1><p className="text-gray-500 text-sm mt-0.5">Bulk sends via Meta API using approved templates with scheduling & targeting</p></div>
-        <div className="flex gap-2"><button onClick={fetch_} className="p-2.5 text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50"><RefreshCw className="w-4 h-4"/></button><button onClick={openWiz} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 shadow-md shadow-emerald-500/20"><Plus className="w-4 h-4"/>New Campaign</button></div>
+    <div className="space-y-6">
+
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 animate-fade-in-up">
+        <div>
+          <h1 className="text-[22px] font-extrabold text-surface-900 tracking-tight">Campaigns</h1>
+          <p className="text-[13px] text-surface-400 mt-1 flex items-center gap-1.5">
+            <Megaphone className="w-3.5 h-3.5" />
+            Create and manage bulk message campaigns
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fetchCampaigns(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-surface-200 bg-white text-[13px] font-semibold text-surface-600 hover:bg-surface-50 hover:border-surface-300 transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            onClick={() => navigate('/portal/campaigns/new')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold rounded-lg transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Campaign
+          </button>
+        </div>
       </div>
 
-      {loading ? <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{[1,2,3].map(i=><div key={i} className="h-60 bg-white rounded-2xl animate-pulse"/>)}</div>
-      : campaigns.length===0 ? <div className="text-center py-20 bg-white rounded-2xl border border-gray-100"><Megaphone className="w-16 h-16 text-gray-200 mx-auto mb-4"/><p className="text-gray-400 font-semibold text-lg mb-1">No campaigns</p><button onClick={openWiz} className="mt-3 inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600"><Plus className="w-4 h-4"/>Create Campaign</button></div>
-      : <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{campaigns.map(c=>{const cfg=SC[c.status]||SC.draft;const SI=cfg.icon;const total=c.stats?.total||0;const sent=c.stats?.sent||0;const pct=total>0?Math.round((sent/total)*100):0;return(
-        <div key={c._id} className="bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-md transition-all animate-fade-in-up">
-          <div className="flex items-start justify-between mb-3"><div><h3 className="text-sm font-bold text-gray-900 mb-1">{c.name}</h3><span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full uppercase ${cfg.color}`}><SI className="w-3 h-3"/>{c.status}</span></div>
-            <div className="flex gap-1">{['draft','scheduled','paused'].includes(c.status)&&<button onClick={()=>launch(c._id)} className="p-1.5 text-emerald-500 hover:bg-emerald-50 rounded-lg" title="Launch"><Play className="w-4 h-4"/></button>}<button onClick={()=>fetchDetail(c._id)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg" title="Details"><Eye className="w-4 h-4"/></button><button onClick={()=>rerun(c._id)} className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Rerun"><RefreshCw className="w-4 h-4"/></button>{['draft','completed','failed'].includes(c.status)&&<button onClick={()=>del(c._id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>}</div>
-          </div>
-          <div className="text-xs text-gray-400 mb-1">Template: <span className="font-medium text-gray-600">{c.template_name}</span></div>
-          {c.target_type==='tags'&&<div className="text-xs text-gray-400 mb-1">Tags: {(c.target_tags||[]).map(t=><span key={t} className="inline-block px-1.5 py-0.5 bg-violet-50 text-violet-700 text-[9px] font-bold rounded mr-1">{t}</span>)}</div>}
-          {c.scheduled_at&&<div className="text-xs text-gray-400 mb-2 flex items-center gap-1"><Calendar className="w-3 h-3"/>Scheduled: {new Date(c.scheduled_at).toLocaleString()}</div>}
-          <div className="mb-3"><div className="flex items-center justify-between text-xs text-gray-500 mb-1.5"><span>Delivery</span><span className="font-semibold">{pct}%</span></div><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:`${pct}%`}}/></div></div>
-          <div className="grid grid-cols-4 gap-2 text-center"><div className="bg-gray-50 rounded-lg py-2"><p className="text-xs text-gray-400">Total</p><p className="text-sm font-bold text-gray-900">{total}</p></div><div className="bg-gray-50 rounded-lg py-2"><p className="text-xs text-gray-400">Sent</p><p className="text-sm font-bold text-emerald-600">{sent}</p></div><div className="bg-gray-50 rounded-lg py-2"><p className="text-xs text-gray-400">Read</p><p className="text-sm font-bold text-blue-600">{c.stats?.read||0}</p></div><div className="bg-gray-50 rounded-lg py-2"><p className="text-xs text-gray-400">Failed</p><p className="text-sm font-bold text-red-500">{c.stats?.failed||0}</p></div></div>
-          <p className="text-[10px] text-gray-400 mt-3">Created {new Date(c.created_at).toLocaleDateString()}</p>
+      {/* ── KPI Strip ── */}
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[1,2,3,4,5,6].map(i => <Skel key={i} />)}
         </div>
-      )})}</div>}
-
-      {/* Detail Modal */}
-      {showDetail && detailData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100"><h2 className="font-display text-lg font-bold text-gray-900">{detailData.campaign?.name} — Report</h2><button onClick={()=>setShowDetail(null)} className="p-1 text-gray-400"><X className="w-5 h-5"/></button></div>
-          <div className="p-6 space-y-4">
-            <div className="grid grid-cols-4 gap-3 text-center">{[['Total',detailData.live_stats?.sent+detailData.live_stats?.failed+detailData.live_stats?.delivered+detailData.live_stats?.read||detailData.campaign?.stats?.total||0,'text-gray-900'],['Sent',detailData.live_stats?.sent||0,'text-emerald-600'],['Read',detailData.live_stats?.read||0,'text-blue-600'],['Failed',detailData.live_stats?.failed||0,'text-red-500']].map(([l,v,c])=><div key={l} className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">{l}</p><p className={`text-lg font-bold ${c}`}>{v}</p></div>)}</div>
-            {detailData.errors?.length>0&&(
-              <div><p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Failed Deliveries ({detailData.errors.length})</p>
-                <div className="max-h-48 overflow-y-auto space-y-1.5">{detailData.errors.map((e,i)=>(
-                  <div key={i} className={`p-3 rounded-xl text-xs ${e.error_source==='meta'?'bg-red-50 border border-red-100':'bg-orange-50 border border-orange-100'}`}>
-                    <div className="flex items-center gap-2 mb-0.5"><span className={`px-1.5 py-0.5 text-[9px] font-bold rounded uppercase ${e.error_source==='meta'?'bg-red-200 text-red-800':'bg-orange-200 text-orange-800'}`}>{e.error_source||'platform'}</span><span className="font-semibold text-gray-800">+{e.contact_phone}</span></div>
-                    <p className="text-gray-600">{e.error_message}</p>
-                  </div>
-                ))}</div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {kpis.map((k, idx) => (
+            <div
+              key={k.label}
+              className={`bg-white rounded-xl border ${k.border} p-4 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-fade-in-up group`}
+              style={{ animationDelay: `${idx * 60}ms` }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-9 h-9 rounded-lg ${k.bg} flex items-center justify-center`}>
+                  <k.icon className={`w-[18px] h-[18px] ${k.color}`} />
+                </div>
               </div>
+              <p className="text-[22px] font-extrabold text-surface-900 tracking-tight leading-none">{k.value}</p>
+              <p className="text-[11px] text-surface-400 mt-1.5 font-medium">{k.label}</p>
+              <p className="text-[10px] text-surface-300 mt-0.5">{k.sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Filter Row: Tabs + Search ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 animate-fade-in-up" style={{ animationDelay: '120ms' }}>
+        <div className="flex items-center bg-surface-100 rounded-lg p-0.5">
+          {STATUS_TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setStatusFilter(tab.key)}
+              className={`px-3 py-[6px] rounded-md text-[12px] font-semibold transition-all ${
+                statusFilter === tab.key
+                  ? 'bg-white text-surface-900 shadow-sm'
+                  : 'text-surface-500 hover:text-surface-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <div className="flex items-center gap-2 rounded-lg border border-surface-200 bg-white px-3 py-2 w-full sm:w-64 focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:border-brand-300 transition-all">
+          <Search className="w-3.5 h-3.5 text-surface-400 flex-shrink-0" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search campaigns..."
+            className="flex-1 border-0 bg-transparent text-[12px] text-surface-900 placeholder-surface-400 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      {/* ── Campaigns Table ── */}
+      <div className="bg-white rounded-xl border border-surface-200 overflow-hidden animate-fade-in-up" style={{ animationDelay: '180ms' }}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-100">
+          <div className="flex items-center gap-3">
+            <h3 className="text-[14px] font-bold text-surface-900">Campaigns</h3>
+            <span className="text-[11px] font-bold text-surface-400 bg-surface-100 px-2 py-0.5 rounded-full">
+              {filteredCampaigns.length}
+            </span>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="p-5 space-y-3">
+            {[1,2,3,4].map(i => <div key={i} className="h-14 bg-surface-50 rounded-lg animate-pulse" />)}
+          </div>
+        ) : filteredCampaigns.length === 0 ? (
+          <div className="py-16 text-center">
+            <Megaphone className="w-8 h-8 text-surface-300 mx-auto mb-2" />
+            <p className="text-[13px] text-surface-500 font-medium">
+              {statusFilter === 'all' ? 'No campaigns yet' : `No ${statusFilter} campaigns`}
+            </p>
+            <p className="text-[11px] text-surface-400 mt-1">
+              {statusFilter === 'all' ? 'Create your first campaign to start sending bulk messages' : 'Try a different filter'}
+            </p>
+            {statusFilter === 'all' && (
+              <button
+                onClick={() => navigate('/portal/campaigns/new')}
+                className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold rounded-lg transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Create Campaign
+              </button>
             )}
           </div>
-        </div></div>
-      )}
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-surface-100 bg-surface-50/60">
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Campaign</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Template</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Status</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Sent</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Delivered</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Read</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Failed</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400 w-[140px]">Progress</th>
+                  <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Date</th>
+                  <th className="px-5 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-surface-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-100">
+                {filteredCampaigns.map(campaign => {
+                  const st = campaign.status || 'draft';
+                  const sm = STATUS_MAP[st] || STATUS_MAP.draft;
+                  const total = campaign.stats?.total || 0;
+                  const sent = campaign.stats?.sent || 0;
+                  const delivered = campaign.stats?.delivered || 0;
+                  const read = campaign.stats?.read || 0;
+                  const failed = campaign.stats?.failed || 0;
+                  const progress = total > 0 ? Math.round((sent / total) * 100) : 0;
 
-      {/* Create Wizard */}
-      {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100"><h2 className="font-display text-lg font-bold text-gray-900">New Campaign — Step {step}/4</h2><button onClick={()=>setShowCreate(false)} className="p-1 text-gray-400"><X className="w-5 h-5"/></button></div>
-          <div className="flex gap-1 px-6 pt-4">{[1,2,3,4].map(s=><div key={s} className={`h-1.5 flex-1 rounded-full ${s<=step?'bg-emerald-500':'bg-gray-200'}`}/>)}</div>
-          <div className="p-6">
-            {step===1&&<div className="space-y-4">
-              <div><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Campaign Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="March Promo" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"/></div>
-              <div><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Schedule (Optional)</label><input type="datetime-local" value={form.scheduled_at} onChange={e=>setForm({...form,scheduled_at:e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"/><p className="text-[10px] text-gray-400 mt-1">Leave empty to start instantly after publish</p></div>
-            </div>}
-
-            {step===2&&<div className="space-y-4">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Select Meta-Approved Template</label>
-              {templates.length===0?<p className="text-sm text-gray-400 text-center py-8">No approved templates</p>
-              :<div className="space-y-2 max-h-60 overflow-y-auto">{templates.map(t=>{const vars=extractVars(t.name);return(
-                <button key={t.id} onClick={()=>{setForm({...form,template_name:t.name,template_language:t.language,variable_mapping:{},template_components:[],header_media_url:'',header_media_mode:'global',header_media_by_contact:{}});}} className={`w-full text-left p-3 rounded-xl border-2 transition-all ${form.template_name===t.name?'border-emerald-300 bg-emerald-50':'border-gray-100 bg-gray-50 hover:border-gray-200'}`}><p className="text-sm font-semibold text-gray-900">{t.name}</p><p className="text-xs text-gray-500">{t.category} • {t.language}{vars.length>0?` • ${vars.length} var(s)`:''}</p></button>
-              )})}</div>}
-              {headerMediaFormat ? (
-                <div className="mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
-                  <p className="text-xs font-semibold text-blue-700 mb-2">Header Media ({headerMediaFormat.toUpperCase()})</p>
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    <button type="button" onClick={() => setForm((prev) => ({ ...prev, header_media_mode: 'global' }))} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${form.header_media_mode === 'global' ? 'bg-white border-blue-300 text-blue-700' : 'border-transparent text-gray-500 bg-blue-100/60'}`}>One file for all</button>
-                    <button type="button" onClick={() => setForm((prev) => ({ ...prev, header_media_mode: 'individual' }))} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${form.header_media_mode === 'individual' ? 'bg-white border-blue-300 text-blue-700' : 'border-transparent text-gray-500 bg-blue-100/60'}`}>Different per contact</button>
-                  </div>
-                  {form.header_media_mode === 'individual' ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-blue-700">Per-contact media can be assigned in Step 3 for all audience types.</p>
-                      <button type="button" onClick={() => setStep(3)} className="px-2 py-1 text-[11px] font-semibold rounded border border-blue-200 bg-white text-blue-700 hover:bg-blue-50">Go to Step 3</button>
-                    </div>
-                  ) : (
-                  <input
-                    value={form.header_media_url || ''}
-                    onChange={(event) => setForm((prev) => ({ ...prev, header_media_url: event.target.value }))}
-                    placeholder={`Public ${headerMediaFormat} URL`}
-                    className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
-                  />
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setActiveHeaderRecipient(''); setShowHeaderLibrary(true); }}
-                    disabled={form.header_media_mode === 'individual'}
-                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                  >
-                    {form.header_media_mode === 'individual' ? 'Use per-contact gallery in Step 3' : 'Choose from gallery'}
-                  </button>
-                </div>
-              ) : null}
-              {form.template_name && extractVars(form.template_name).length>0 && (
-                <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-100">
-                  <p className="text-xs font-semibold text-amber-700 mb-2">Template Variables</p>
-                  {extractVars(form.template_name).map((token)=>(
-                    <div key={token.key} className="grid grid-cols-[auto,1fr] gap-2 mb-2 items-center">
-                      <span className="text-xs font-mono bg-amber-100 text-amber-800 px-2 py-1 rounded">{`${token.slot.toUpperCase()} {{${token.index}}}`}</span>
-                      <div className="space-y-2">
-                        <select value={variableConfigFor(token.key).source} onChange={e=>setVariableConfig(token.key,{source:e.target.value})} className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500">
-                          <option value="custom">Custom input</option><option value="contact_name">Contact Name</option><option value="contact_phone">Contact Phone</option><option value="contact_email">Contact Email</option>
-                      </select>
-                        {variableConfigFor(token.key).source === 'custom' ? (
-                          <input
-                            value={variableConfigFor(token.key).value}
-                            onChange={(e) => setVariableConfig(token.key, { value: e.target.value })}
-                            placeholder={`Value for ${token.slot.toUpperCase()} {{${token.index}}}`}
-                            className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-1 focus:ring-emerald-500"
-                          />
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>}
-
-            {step===3&&<div className="space-y-4">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Target Audience</label>
-              <div className="flex gap-2">{[{k:'all',l:'All Contacts',icon:Users},{k:'tags',l:'By Tags',icon:Tag},{k:'selected',l:'Select Manually',icon:CheckCircle2}].map(o=>(
-                <button key={o.k} onClick={()=>setForm({...form,target_type:o.k,recipients:[],target_tags:[]})} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium flex-1 border-2 transition-all ${form.target_type===o.k?'border-emerald-300 bg-emerald-50 text-emerald-700':'border-gray-100 text-gray-600 hover:border-gray-200'}`}><o.icon className="w-4 h-4"/>{o.l}</button>
-              ))}</div>
-              {form.target_type==='all'&&<div className="p-3 bg-blue-50 rounded-xl"><p className="text-xs text-blue-700">All {contacts.filter(c=>c.opt_in!==false).length} opted-in contacts will receive this campaign.</p></div>}
-              {form.target_type==='tags'&&<div><p className="text-xs text-gray-400 mb-2">Select tags:</p><div className="flex flex-wrap gap-1.5">{allLabels.map(l=>(
-                <button key={l} onClick={()=>toggleTag(l)} className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${form.target_tags.includes(l)?'bg-emerald-500 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{l}</button>
-              ))}</div>{form.target_tags.length>0&&<p className="text-xs text-emerald-600 mt-2">{filteredContacts.length} contacts match these tags</p>}</div>}
-              {form.target_type==='selected'&&<div><div className="flex items-center justify-between mb-2"><span className="text-xs text-gray-400">{form.recipients.length} selected</span><button onClick={selectAll} className="text-xs text-emerald-600 font-medium hover:underline">Select All</button></div>
-                <div className="space-y-1 max-h-52 overflow-y-auto">{contacts.filter(c=>c.opt_in!==false).map(c=>(
-                  <button key={c._id} onClick={()=>toggle(c.phone)} className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-all ${form.recipients.includes(c.phone)?'bg-emerald-50 border border-emerald-200':'hover:bg-gray-50 border border-transparent'}`}>
-                    <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 ${form.recipients.includes(c.phone)?'bg-emerald-500':'border-2 border-gray-300'}`}>{form.recipients.includes(c.phone)&&<svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}</div>
-                    <div className="flex-1 min-w-0"><p className="text-xs font-medium text-gray-700">{c.name||c.phone}</p></div>
-                    {c.wa_exists==='yes'&&<span className="text-[9px] font-bold text-emerald-600">WA✓</span>}
-                    {c.wa_exists==='no'&&<span className="text-[9px] font-bold text-red-500">No WA</span>}
-                    {c.labels?.map(l=><span key={l} className="px-1.5 py-0.5 text-[9px] bg-gray-100 text-gray-500 rounded">{l}</span>)}
-                  </button>
-                ))}</div>
-              </div>}
-              {headerMediaFormat && form.header_media_mode==='individual' ? (
-                <div className="mt-3 p-3 rounded-xl border border-blue-100 bg-blue-50">
-                  <p className="text-xs font-semibold text-blue-700 mb-2">Per-contact Header Media ({audienceContacts.length} contacts)</p>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {audienceContacts.map((contact) => {
-                      const phone = contact.phone;
-                      return (
-                      <div key={phone} className="flex items-center gap-2 rounded-lg border border-blue-100 bg-white px-2 py-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-gray-700 truncate">{contact?.name || contact?.wa_name || phone}</p>
-                          <p className="text-[10px] text-gray-400 truncate">{phone}</p>
-                          <input
-                            value={form.header_media_by_contact?.[phone] || ''}
-                            onChange={(event) => setForm((prev) => ({ ...prev, header_media_by_contact: { ...(prev.header_media_by_contact || {}), [phone]: event.target.value } }))}
-                            placeholder={`URL for ${phone}`}
-                            className="mt-1 w-full text-[11px] bg-gray-50 border border-gray-200 rounded px-2 py-1"
-                          />
+                  return (
+                    <tr
+                      key={campaign._id}
+                      className="hover:bg-surface-50/60 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/portal/campaigns/${campaign._id}`)}
+                    >
+                      <td className="px-5 py-3">
+                        <p className="text-[13px] font-semibold text-surface-900 truncate max-w-[200px]">{campaign.name}</p>
+                        {campaign.target_type === 'tags' && campaign.target_tags?.length > 0 && (
+                          <div className="flex items-center gap-1 mt-1">
+                            {campaign.target_tags.slice(0, 2).map(tag => (
+                              <span key={tag} className="text-[9px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">{tag}</span>
+                            ))}
+                            {campaign.target_tags.length > 2 && <span className="text-[9px] text-surface-400">+{campaign.target_tags.length - 2}</span>}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-[12px] text-surface-600 font-medium">{campaign.template_name || '—'}</span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sm.cls}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${sm.dot}`} />
+                          {sm.label}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-surface-900">{sent.toLocaleString()}</td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-emerald-600">{delivered.toLocaleString()}</td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-blue-600">{read.toLocaleString()}</td>
+                      <td className="px-5 py-3 text-[13px] font-semibold text-red-500">{failed.toLocaleString()}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-surface-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-700 ${progress >= 90 ? 'bg-emerald-500' : progress >= 50 ? 'bg-blue-500' : 'bg-amber-500'}`}
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-bold text-surface-500 w-8 text-right">{progress}%</span>
                         </div>
-                        <button type="button" onClick={() => { setActiveHeaderRecipient(phone); setShowHeaderLibrary(true); }} className="px-2 py-1 text-[11px] font-semibold rounded border border-gray-200 bg-gray-50 hover:bg-gray-100">Gallery</button>
-                      </div>
-                    )})}
-                  </div>
-                </div>
-              ) : null}
-            </div>}
-
-            {step===4&&<div className="space-y-3">
-              <h3 className="text-sm font-semibold text-gray-900">Review Campaign</h3>
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Name</span><span className="font-medium text-gray-900">{form.name}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Template</span><span className="font-medium text-gray-900">{form.template_name}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Targeting</span><span className="font-medium text-gray-900 capitalize">{form.target_type}{form.target_type==='tags'?`: ${form.target_tags.join(', ')}`:''}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Recipients</span><span className="font-medium text-gray-900">{form.target_type==='all'?contacts.filter(c=>c.opt_in!==false).length:form.target_type==='tags'?filteredContacts.length:form.recipients.length}</span></div>
-                {form.scheduled_at&&<div className="flex justify-between"><span className="text-gray-500">Schedule</span><span className="font-medium text-gray-900">{new Date(form.scheduled_at).toLocaleString()}</span></div>}
-              </div>
-            </div>}
+                      </td>
+                      <td className="px-5 py-3 text-[12px] text-surface-500 whitespace-nowrap">
+                        {campaign.created_at ? new Date(campaign.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                      </td>
+                      <td className="px-5 py-3 text-right" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {['draft', 'scheduled', 'paused'].includes(st) && (
+                            <button onClick={() => launchCampaign(campaign._id)} className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors" title="Launch">
+                              <Play className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button onClick={() => navigate(`/portal/campaigns/${campaign._id}`)} className="p-1.5 hover:bg-surface-100 text-surface-600 rounded-lg transition-colors" title="View Details">
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => rerunCampaign(campaign._id)} className="p-1.5 hover:bg-surface-100 text-surface-600 rounded-lg transition-colors" title="Rerun">
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                          {['draft', 'completed', 'failed'].includes(st) && (
+                            <button onClick={() => deleteCampaign(campaign._id)} className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors" title="Delete">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <div className="flex justify-between gap-3 px-6 py-4 border-t border-gray-100">
-            {step>1?<button onClick={()=>setStep(step-1)} className="px-5 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl">Back</button>:<div/>}
-            {step<4?<button onClick={()=>setStep(step+1)} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600">Next<ArrowRight className="w-4 h-4"/></button>
-            :<button onClick={handleCreate} disabled={creating} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl hover:bg-emerald-600 disabled:opacity-50">{creating?<div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>:<Send className="w-4 h-4"/>}Publish Campaign</button>}
-          </div>
-        </div></div>
-      )}
-      <MediaLibraryModal
-        open={showHeaderLibrary}
-        onClose={() => setShowHeaderLibrary(false)}
-        title="Select Header Media"
-        subtitle="Pick a server file for campaign template header."
-        allowedTypes={headerMediaFormat ? [headerMediaFormat] : ['document']}
-        onSelect={(assets) => {
-          const first = assets?.[0];
-          if (!first?.public_url) {
-            toast.error('No valid media selected');
-            return;
-          }
-          setForm((current) => {
-            if (activeHeaderRecipient) {
-              return {
-                ...current,
-                header_media_by_contact: { ...(current.header_media_by_contact || {}), [activeHeaderRecipient]: first.public_url },
-              };
-            }
-            return { ...current, header_media_url: first.public_url };
-          });
-          setShowHeaderLibrary(false);
-          setActiveHeaderRecipient('');
-          toast.success('Header media selected');
-        }}
-      />
+        )}
+      </div>
     </div>
   );
 }

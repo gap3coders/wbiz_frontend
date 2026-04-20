@@ -42,7 +42,7 @@ export default function PortalPlaceholderPage({
               <Icon className="w-7 h-7" />
             </div>
             <div>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold mb-2">{title}</h1>
+              <h1 className="text-3xl sm:text-4xl font-bold mb-2">{title}</h1>
               <p className="text-emerald-50/90 text-base sm:text-lg leading-relaxed">{description}</p>
             </div>
           </div>
@@ -82,7 +82,7 @@ export default function PortalPlaceholderPage({
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.4fr,0.9fr] gap-6">
         <section className="bg-white rounded-2xl border border-gray-100 p-6">
-          <h2 className="font-display text-xl font-semibold text-gray-900 mb-5">What This Area Will Handle</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-5">What This Area Will Handle</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {highlights.map((item) => (
               <div key={item.title} className="rounded-2xl bg-gray-50 border border-gray-100 p-5">
@@ -94,7 +94,7 @@ export default function PortalPlaceholderPage({
         </section>
 
         <section className="bg-white rounded-2xl border border-gray-100 p-6">
-          <h2 className="font-display text-xl font-semibold text-gray-900 mb-5">Next Steps</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-5">Next Steps</h2>
           <div className="space-y-3">
             {nextSteps.map((step) => (
               <div key={step} className="flex items-start gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-100">

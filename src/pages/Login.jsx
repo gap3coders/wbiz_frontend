@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, ArrowRight, MessageSquare, Mail, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -19,14 +19,12 @@ export default function Login() {
   const [showResend, setShowResend] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
 
-  // Show success message if just registered
   useEffect(() => {
     if (location.state?.registered) {
       toast.success('Account created! Check your email to verify.');
     }
   }, [location.state]);
 
-  // Lockout countdown timer
   useEffect(() => {
     if (!lockedUntil) return;
     const interval = setInterval(() => {
@@ -60,6 +58,9 @@ export default function Login() {
         setShowResend(true);
         setUnverifiedEmail(res?.data?.email || email);
         toast.error('Please verify your email first');
+      } else if (res?.data?.code === 'PENDING_APPROVAL') {
+        toast.error('Your account is pending admin approval');
+        navigate('/pending-approval');
       } else {
         toast.error(res?.error || 'Login failed');
       }
@@ -79,106 +80,160 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left branding panel */}
-      <div className="hidden lg:flex lg:w-[480px] xl:w-[540px] bg-brand-gradient flex-col justify-between p-10 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-20 -left-10 w-72 h-72 bg-white/20 rounded-full blur-3xl" />
-          <div className="absolute bottom-20 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl" />
-        </div>
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-white font-display font-bold text-xl">WhatsApp SaaS</span>
-          </div>
-          <h1 className="text-white font-display text-4xl font-bold leading-tight mb-4">
-            Welcome back
-          </h1>
-          <p className="text-emerald-100 text-lg leading-relaxed max-w-md">
-            Sign in to manage your WhatsApp Business conversations, campaigns, and more.
-          </p>
-        </div>
-        <div className="relative z-10">
-          <div className="bg-white/10 rounded-2xl p-6 backdrop-blur-sm border border-white/10">
-            <p className="text-emerald-100 text-sm italic">"This platform transformed how we handle customer support via WhatsApp. Response times dropped by 60%."</p>
-            <p className="text-white font-medium text-sm mt-3">— Priya Sharma, Head of Support</p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-surface-50 via-white to-brand-50/30 flex items-center justify-center p-4">
+      {/* Subtle background pattern */}
+      <div className="absolute inset-0 opacity-30 pointer-events-none">
+        <div className="absolute top-20 left-10 w-72 h-72 bg-brand-100 rounded-full blur-3xl" />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-emerald-100 rounded-full blur-3xl" />
       </div>
 
-      {/* Right form panel */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-md animate-fade-in-up">
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-9 h-9 bg-emerald-600 rounded-xl flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-display font-bold text-lg text-gray-900">WhatsApp SaaS</span>
+      <div className="w-full max-w-[420px] relative z-10">
+        {/* Logo and branding */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-brand-500 to-emerald-600 rounded-xl mb-4">
+            <span className="text-white font-bold text-xl">W</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">WBIZ.IN</h1>
+          <p className="text-sm text-surface-600">WhatsApp Business Platform</p>
+        </div>
+
+        {/* Auth card */}
+        <div className="bg-white rounded-2xl shadow-card border border-surface-200 p-8 mb-6">
+          {/* Form header */}
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Welcome back</h2>
+            <p className="text-sm text-surface-600">Sign in to your account</p>
           </div>
 
-          <h2 className="font-display text-2xl font-bold text-gray-900 mb-1">Sign in to your account</h2>
-          <p className="text-gray-500 mb-8">Enter your credentials to access your portal</p>
-
+          {/* Login form */}
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Email field */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
+              <label htmlFor="email" className="block text-sm font-semibold text-gray-900 mb-2">
+                Email address
+              </label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm transition-all hover:border-gray-300" placeholder="you@company.com" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="you@company.com"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-surface-200 bg-white text-sm text-gray-900 placeholder-surface-400 transition-all focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
               </div>
             </div>
 
+            {/* Password field */}
             <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <label className="text-sm font-medium text-gray-700">Password</label>
-                <Link to="/forgot-password" className="text-xs text-emerald-600 font-medium hover:underline">Forgot password?</Link>
+              <div className="flex justify-between items-center mb-2">
+                <label htmlFor="password" className="block text-sm font-semibold text-gray-900">
+                  Password
+                </label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-semibold text-brand-600 hover:text-brand-700 transition-colors"
+                >
+                  Forgot?
+                </Link>
               </div>
               <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50/50 text-sm pr-10 transition-all hover:border-gray-300" placeholder="Enter password" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-surface-200 bg-white text-sm text-gray-900 placeholder-surface-400 transition-all focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 transition-colors p-1"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
-                <span className="text-sm text-gray-600">Remember me for 30 days</span>
-              </label>
-            </div>
+            {/* Remember me checkbox */}
+            <label className="flex items-center gap-2 cursor-pointer py-1">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border border-surface-200 text-brand-600 bg-white focus:ring-1 focus:ring-brand-500 cursor-pointer"
+              />
+              <span className="text-sm text-surface-600">Keep me signed in for 30 days</span>
+            </label>
 
             {/* Lockout warning */}
             {lockedUntil && countdown > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <p className="text-sm text-red-700 font-medium">
-                  Account temporarily locked. Try again in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm font-semibold text-red-900 mb-1">Account temporarily locked</p>
+                <p className="text-xs text-red-800">
+                  Try again in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
                 </p>
               </div>
             )}
 
             {/* Unverified email - resend */}
             {showResend && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
-                <p className="text-sm text-amber-800">Email not verified.</p>
-                <button type="button" onClick={handleResend}
-                  className="text-sm font-semibold text-amber-700 hover:text-amber-900 underline">Resend verification</button>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-amber-900">Email verification required</p>
+                  <p className="text-xs text-amber-800 mt-0.5">Check your inbox for the verification link</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  className="text-xs font-bold text-amber-700 hover:text-amber-900 transition-colors whitespace-nowrap"
+                >
+                  Resend
+                </button>
               </div>
             )}
 
-            <button type="submit" disabled={loading || (lockedUntil && countdown > 0)}
-              className="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-600/20">
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><span>Sign In</span><ArrowRight className="w-4 h-4" /></>}
+            {/* Submit button */}
+            <button
+              type="submit"
+              disabled={loading || (lockedUntil && countdown > 0)}
+              className="w-full py-2.5 px-4 mt-2 bg-brand-600 hover:bg-brand-700 disabled:bg-surface-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                'Sign In'
+              )}
             </button>
           </form>
+        </div>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
-            Don't have an account? <Link to="/register" className="text-emerald-600 font-semibold hover:underline">Create one</Link>
+        {/* Footer links */}
+        <div className="text-center space-y-3">
+          <p className="text-sm text-surface-600">
+            Don't have an account?{' '}
+            <Link to="/register" className="text-brand-600 font-semibold hover:text-brand-700 transition-colors">
+              Create one
+            </Link>
+          </p>
+          <p className="text-xs text-surface-400">
+            By signing in, you agree to our{' '}
+            <a href="#" className="text-surface-600 hover:text-surface-700 underline">
+              Terms
+            </a>{' '}
+            and{' '}
+            <a href="#" className="text-surface-600 hover:text-surface-700 underline">
+              Privacy Policy
+            </a>
           </p>
         </div>
       </div>

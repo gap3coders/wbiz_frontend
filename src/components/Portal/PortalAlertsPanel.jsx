@@ -6,7 +6,7 @@ export function PortalWarningsCard({ warnings = [], title = 'Action required', s
     <section className="bg-white rounded-[28px] border border-gray-100 p-6 shadow-sm shadow-gray-100/70">
       <div className="flex items-center justify-between gap-4 mb-5">
         <div>
-          <h2 className="font-display text-xl font-semibold text-gray-900">{title}</h2>
+          <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
           <p className="text-sm text-gray-500">{subtitle}</p>
         </div>
         <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center">
@@ -47,7 +47,7 @@ export function PortalNoticesCard({ notices = [], title = 'Recent notices', subt
     <section className="bg-white rounded-[28px] border border-gray-100 p-6 shadow-sm shadow-gray-100/70">
       <div className="flex items-center justify-between gap-4 mb-5">
         <div>
-          <h2 className="font-display text-xl font-semibold text-gray-900">{title}</h2>
+          <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
           <p className="text-sm text-gray-500">{subtitle}</p>
         </div>
         <div className="w-11 h-11 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center">

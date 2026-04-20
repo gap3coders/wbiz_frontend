@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api, { isTokenExpired, refreshAccessToken } from '../api/axios';
+import api, { refreshAccessToken } from '../api/axios';
 
 const AuthContext = createContext(null);
 
@@ -13,33 +13,36 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [tenant, setTenant] = useState(null);
   const [whatsappAccount, setWhatsappAccount] = useState(null);
+  const [allTenants, setAllTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Fetch current user on mount
+  // Fetch current user on mount — relies on httpOnly access_token cookie
   const fetchUser = useCallback(async () => {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
     try {
-      if (isTokenExpired(token)) {
-        await refreshAccessToken();
-      }
-
       const { data } = await api.get('/auth/me');
       setUser(data.data.user);
       setTenant(data.data.tenant);
       setWhatsappAccount(data.data.whatsapp_account);
+      setAllTenants(data.data.all_tenants || []);
       setIsAuthenticated(true);
     } catch {
-      localStorage.removeItem('access_token');
-      setUser(null);
-      setTenant(null);
-      setWhatsappAccount(null);
-      setIsAuthenticated(false);
+      // Cookie may be expired or missing — try silent refresh once
+      try {
+        await refreshAccessToken();
+        const { data } = await api.get('/auth/me');
+        setUser(data.data.user);
+        setTenant(data.data.tenant);
+        setWhatsappAccount(data.data.whatsapp_account);
+        setAllTenants(data.data.all_tenants || []);
+        setIsAuthenticated(true);
+      } catch {
+        setUser(null);
+        setTenant(null);
+        setWhatsappAccount(null);
+        setAllTenants([]);
+        setIsAuthenticated(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -52,7 +55,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password, remember_me = false) => {
     const { data } = await api.post('/auth/login', { email, password, remember_me });
     const result = data.data;
-    localStorage.setItem('access_token', result.access_token);
+    // access_token cookie set by backend automatically
     setUser(result.user);
     setIsAuthenticated(true);
     await fetchUser(); // Reload full user data with tenant
@@ -67,7 +70,7 @@ export function AuthProvider({ children }) {
   const verifyEmail = async (token) => {
     const { data } = await api.post('/auth/verify-email', { token });
     const result = data.data;
-    localStorage.setItem('access_token', result.access_token);
+    // access_token cookie set by backend automatically
     setUser(result.user);
     setIsAuthenticated(true);
     await fetchUser();
@@ -78,11 +81,37 @@ export function AuthProvider({ children }) {
     try {
       await api.post('/auth/logout');
     } catch (e) { /* ignore */ }
-    localStorage.removeItem('access_token');
     setUser(null);
     setTenant(null);
     setWhatsappAccount(null);
+    setAllTenants([]);
     setIsAuthenticated(false);
+  };
+
+  const switchTenant = async (tenantId) => {
+    const { data } = await api.post('/auth/switch-tenant', { tenant_id: tenantId });
+    const result = data.data;
+    setTenant(result.tenant);
+    setWhatsappAccount(result.whatsapp_account);
+    await fetchUser(); // Full reload to refresh everything
+    return result;
+  };
+
+  const createBusiness = async () => {
+    const { data } = await api.post('/auth/create-business');
+    const result = data.data;
+    setTenant(result.tenant);
+    setWhatsappAccount(null);
+    await fetchUser(); // Full reload
+    return result;
+  };
+
+  const cancelSetup = async (deletePending = false) => {
+    const { data } = await api.post('/auth/cancel-setup', { delete_pending: deletePending });
+    const result = data.data;
+    setTenant(result.tenant);
+    await fetchUser(); // Full reload
+    return result;
   };
 
   const forgotPassword = async (email) => {
@@ -130,6 +159,7 @@ export function AuthProvider({ children }) {
     tenant,
     whatsappAccount,
     setWhatsappAccount,
+    allTenants,
     loading,
     isAuthenticated,
     login,
@@ -140,6 +170,9 @@ export function AuthProvider({ children }) {
     resetPassword,
     fetchUser,
     updateUserState,
+    switchTenant,
+    createBusiness,
+    cancelSetup,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

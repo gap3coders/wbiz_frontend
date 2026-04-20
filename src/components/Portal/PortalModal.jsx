@@ -16,7 +16,7 @@ export default function PortalModal({ open, title, subtitle, onClose, children, 
       <div className={`relative w-full ${sizeClass} max-h-[90vh] overflow-hidden rounded-[32px] bg-white shadow-2xl shadow-slate-900/20`}>
         <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5 sm:px-8">
           <div>
-            <h2 className="font-display text-2xl font-semibold text-gray-900">{title}</h2>
+            <h2 className="text-2xl font-semibold text-gray-900">{title}</h2>
             {subtitle ? <p className="text-sm text-gray-500 mt-1">{subtitle}</p> : null}
           </div>
           <button

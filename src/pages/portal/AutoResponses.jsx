@@ -1,1128 +1,464 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle,
-  Bot,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock3,
-  Edit3,
-  FolderOpen,
-  Info,
-  Plus,
-  RefreshCw,
-  Save,
-  Send,
-  Trash2,
-  XCircle,
+  AlertTriangle, Bot, CheckCircle2, ChevronLeft, ChevronRight,
+  Clock, Clock3, Edit3, Hand, HelpCircle, MessageSquare,
+  Pause, Play, Plus, RefreshCw, Trash2, XCircle,
+  Zap, Shield, Hash, Users, Timer,
 } from 'lucide-react';
 import api from '../../api/axios';
-import PortalModal from '../../components/Portal/PortalModal';
-import MediaLibraryModal from '../../MediaLibraryModal';
 
-const TRIGGER_OPTIONS = [
-  { value: 'keyword', label: 'Keyword Reply', hint: 'Reply when inbound text matches one or more keywords.' },
-  { value: 'welcome', label: 'Welcome Reply', hint: 'Reply only to the first inbound message from a contact.' },
-  { value: 'away', label: 'Away Message', hint: 'Reply only outside your configured business hours.' },
-  { value: 'fallback', label: 'Fallback Reply', hint: 'Reply when no other active auto-response matches.' },
-];
-
-const RESPONSE_OPTIONS = [
-  { value: 'text', label: 'Text Reply' },
-  { value: 'template', label: 'Meta Template' },
-];
-
-const MATCH_OPTIONS = [
-  { value: 'contains', label: 'Contains keyword' },
-  { value: 'exact', label: 'Matches exactly' },
-  { value: 'starts_with', label: 'Starts with keyword' },
-];
-
-const WEEK_DAYS = [
-  { value: 1, label: 'Mon' },
-  { value: 2, label: 'Tue' },
-  { value: 3, label: 'Wed' },
-  { value: 4, label: 'Thu' },
-  { value: 5, label: 'Fri' },
-  { value: 6, label: 'Sat' },
-  { value: 0, label: 'Sun' },
-];
-
-const STATUS_STYLES = {
-  sent: { bg: 'bg-emerald-50', text: 'text-emerald-700', icon: CheckCircle2 },
-  skipped: { bg: 'bg-amber-50', text: 'text-amber-700', icon: AlertTriangle },
-  failed: { bg: 'bg-red-50', text: 'text-red-700', icon: XCircle },
+/* ── Trigger config ── */
+const TRIGGER_MAP = {
+  keyword: { label: 'Keyword Reply', cls: 'bg-blue-50 text-blue-700 border-blue-200', dot: 'bg-blue-500' },
+  welcome: { label: 'Welcome Reply', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
+  away: { label: 'Away Message', cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
+  fallback: { label: 'Fallback Reply', cls: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500' },
+  unsubscribe: { label: 'Unsubscribe', cls: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-500' },
+  resubscribe: { label: 'Resubscribe', cls: 'bg-teal-50 text-teal-700 border-teal-200', dot: 'bg-teal-500' },
 };
 
-const extractVars = (template) => {
-  if (!template) return [];
-  const vars = [];
-  for (const component of template.components || []) {
-    if (!['BODY', 'HEADER'].includes(component.type) || !component.text) continue;
-    const matches = component.text.match(/\{\{(\d+)\}\}/g) || [];
-    matches.forEach((match) => {
-      const value = component.type === 'HEADER'
-        ? `header_${match.replace(/[{}]/g, '')}`
-        : match.replace(/[{}]/g, '');
-      if (!vars.includes(value)) vars.push(value);
-    });
-  }
-  return vars;
+const LOG_STATUS_MAP = {
+  sent: { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', label: 'Sent', icon: CheckCircle2 },
+  failed: { cls: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-500', label: 'Failed', icon: XCircle },
+  skipped: { cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Skipped', icon: AlertTriangle },
 };
 
-const emptyForm = {
-  name: '',
-  description: '',
-  active: true,
-  trigger_type: 'keyword',
-  keyword_match_type: 'contains',
-  keywords_text: '',
-  response_type: 'text',
-  text_body: 'Hi {{contact_name}}, thanks for your message. Our team will get back to you shortly.',
-  template_name: '',
-  template_language: 'en',
-  template_header_type: 'none',
-  template_header_media_url: '',
-  template_variables: {},
-  business_hours: {
-    timezone: 'Asia/Kolkata',
-    days: [1, 2, 3, 4, 5],
-    start_time: '09:00',
-    end_time: '18:00',
-  },
-  send_once_per_contact: false,
-  cooldown_minutes: 0,
-  priority: 100,
-  stop_after_match: true,
-};
+const AUTO_RESPONSE_LOG_PAGE_SIZE = 10;
 
-const humanizeTrigger = (trigger) =>
-  TRIGGER_OPTIONS.find((item) => item.value === trigger)?.label || trigger;
+const getPageNumbers = (current, total) => {
+  if (total <= 1) return [1];
+  const pages = new Set([1, total, current, current - 1, current + 1]);
+  return Array.from(pages).filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+};
 
 export default function AutoResponses() {
+  const navigate = useNavigate();
   const [rules, setRules] = useState([]);
   const [logs, setLogs] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [logsPage, setLogsPage] = useState(1);
+  const [logsPagination, setLogsPagination] = useState({ page: 1, pages: 1, total: 0, limit: AUTO_RESPONSE_LOG_PAGE_SIZE });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [editingRule, setEditingRule] = useState(null);
-  const [form, setForm] = useState(emptyForm);
-  const [templates, setTemplates] = useState([]);
-  const [loadingTemplates, setLoadingTemplates] = useState(false);
-  const [showTemplateVars, setShowTemplateVars] = useState(true);
-  const [showTemplateHeaderLibrary, setShowTemplateHeaderLibrary] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState('rules');
 
-  const approvedTemplates = useMemo(
-    () => templates.filter((template) => template.status === 'APPROVED'),
-    [templates]
-  );
-
-  const selectedTemplate = useMemo(
-    () => approvedTemplates.find((template) => template.name === form.template_name) || null,
-    [approvedTemplates, form.template_name]
-  );
-
-  const templateVariableKeys = useMemo(() => extractVars(selectedTemplate), [selectedTemplate]);
-
-  const fetchPage = async () => {
-    setLoading(true);
+  const fetchPage = async (page = logsPage, isManual = false) => {
+    if (isManual) setRefreshing(true);
+    else setLoading(true);
     try {
-      const { data } = await api.get('/auto-responses');
+      const { data } = await api.get('/auto-responses', {
+        params: { logs_page: page, logs_limit: AUTO_RESPONSE_LOG_PAGE_SIZE },
+      });
       setRules(data.data?.rules || []);
       setLogs(data.data?.logs || []);
       setSummary(data.data?.summary || null);
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to load auto responses');
-    } finally {
-      setLoading(false);
-    }
+      const pg = data.data?.pagination?.logs || { page: 1, pages: 1, total: 0, limit: AUTO_RESPONSE_LOG_PAGE_SIZE };
+      setLogsPagination(pg);
+      setLogsPage(pg.page || 1);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to load auto responses');
+    } finally { setLoading(false); setRefreshing(false); }
   };
 
-  useEffect(() => {
-    fetchPage();
-  }, []);
-
-  useEffect(() => {
-    if (!showModal || form.response_type !== 'template' || templates.length) return;
-    setLoadingTemplates(true);
-    api
-      .get('/meta/templates')
-      .then((response) => setTemplates(response.data?.data?.templates || []))
-      .catch((error) => toast.error(error.response?.data?.error || 'Failed to load Meta templates'))
-      .finally(() => setLoadingTemplates(false));
-  }, [showModal, form.response_type, templates.length]);
-
-  useEffect(() => {
-    if (form.response_type !== 'template') return;
-    setForm((current) => {
-      const nextVariables = {};
-      templateVariableKeys.forEach((key) => {
-        nextVariables[key] = current.template_variables[key] || { source: 'static', value: '' };
-      });
-      return {
-        ...current,
-        template_variables: nextVariables,
-      };
-    });
-  }, [templateVariableKeys.join('|'), form.response_type]);
-
-  const openCreate = () => {
-    setEditingRule(null);
-    setForm(emptyForm);
-    setShowTemplateVars(true);
-    setShowModal(true);
-  };
-
-  const openEdit = (rule) => {
-    const templateVariables = {};
-    (rule.template_variables || []).forEach((variable) => {
-      templateVariables[variable.key] = {
-        source: variable.source || 'static',
-        value: variable.value || '',
-      };
-    });
-
-    setEditingRule(rule);
-    setForm({
-      name: rule.name || '',
-      description: rule.description || '',
-      active: Boolean(rule.active),
-      trigger_type: rule.trigger_type || 'keyword',
-      keyword_match_type: rule.keyword_match_type || 'contains',
-      keywords_text: (rule.keywords || []).join('\n'),
-      response_type: rule.response_type || 'text',
-      text_body: rule.text_body || '',
-      template_name: rule.template_name || '',
-      template_language: rule.template_language || 'en',
-      template_header_type: String(rule.template_header_type || 'none'),
-      template_header_media_url: String(rule.template_header_media_url || ''),
-      template_variables: templateVariables,
-      business_hours: {
-        timezone: rule.business_hours?.timezone || 'Asia/Kolkata',
-        days: Array.isArray(rule.business_hours?.days) ? rule.business_hours.days : [1, 2, 3, 4, 5],
-        start_time: rule.business_hours?.start_time || '09:00',
-        end_time: rule.business_hours?.end_time || '18:00',
-      },
-      send_once_per_contact: Boolean(rule.send_once_per_contact),
-      cooldown_minutes: rule.cooldown_minutes || 0,
-      priority: rule.priority || 100,
-      stop_after_match: rule.stop_after_match !== false,
-    });
-    setShowTemplateVars(true);
-    setShowModal(true);
-  };
-
-  const saveRule = async () => {
-    const payload = {
-      ...form,
-      keywords: form.keywords_text
-        .split('\n')
-        .map((keyword) => keyword.trim())
-        .filter(Boolean),
-      template_variables: Object.entries(form.template_variables || {}).map(([key, value]) => ({
-        key,
-        source: value.source,
-        value: value.value,
-      })),
-    };
-
-    delete payload.keywords_text;
-
-    setSaving(true);
-    try {
-      if (editingRule?._id) {
-        await api.put(`/auto-responses/${editingRule._id}`, payload);
-        toast.success('Auto-response rule updated');
-      } else {
-        await api.post('/auto-responses', payload);
-        toast.success('Auto-response rule created');
-      }
-      setShowModal(false);
-      await fetchPage();
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to save rule');
-    } finally {
-      setSaving(false);
-    }
-  };
+  useEffect(() => { fetchPage(); }, [logsPage]);
 
   const deleteRule = async (rule) => {
     if (!window.confirm(`Delete auto-response "${rule.name}"?`)) return;
     try {
       await api.delete(`/auto-responses/${rule._id}`);
       toast.success('Rule deleted');
-      await fetchPage();
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to delete rule');
+      await fetchPage(logsPage, true);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to delete rule');
     }
   };
 
   const toggleActive = async (rule) => {
     try {
-      await api.put(`/auto-responses/${rule._id}`, {
-        active: !rule.active,
-      });
-      await fetchPage();
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to update rule');
+      await api.put(`/auto-responses/${rule._id}`, { active: !rule.active });
+      toast.success(rule.active ? 'Rule paused' : 'Rule activated');
+      await fetchPage(logsPage, true);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Failed to update rule');
     }
   };
 
-  const toggleBusinessDay = (day) => {
-    setForm((current) => {
-      const exists = current.business_hours.days.includes(day);
-      const nextDays = exists
-        ? current.business_hours.days.filter((item) => item !== day)
-        : [...current.business_hours.days, day].sort((a, b) => a - b);
+  /* KPIs matching Dashboard style */
+  const kpis = useMemo(() => [
+    { label: 'Total Rules', value: summary?.total_rules || 0, icon: Shield, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', sub: 'configured rules' },
+    { label: 'Active Rules', value: summary?.active_rules || 0, icon: Zap, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', sub: 'currently running' },
+    { label: 'Messages Sent', value: summary?.sent_count || 0, icon: CheckCircle2, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100', sub: 'auto replies sent' },
+    { label: 'Failed', value: summary?.failed_count || 0, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', sub: 'delivery failures' },
+  ], [summary]);
 
-      return {
-        ...current,
-        business_hours: {
-          ...current.business_hours,
-          days: nextDays,
-        },
-      };
-    });
-  };
+  const logPageNumbers = getPageNumbers(logsPagination.page, logsPagination.pages);
 
-  const renderResponseSummary = (rule) => {
-    if (rule.response_type === 'template') {
-      return (
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-gray-900">{rule.template_name}</p>
-          <p className="text-xs text-gray-500">
-            Meta template in {rule.template_language || 'en'} with {(rule.template_variables || []).length} mapped variables
-          </p>
-        </div>
-      );
-    }
+  const Skel = ({ h = 'h-32' }) => <div className={`bg-white rounded-xl border border-surface-200 ${h} animate-pulse`} />;
 
-    return (
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-gray-900">Text reply</p>
-        <p className="line-clamp-2 text-xs text-gray-500">{rule.text_body || 'No message body configured'}</p>
-      </div>
-    );
-  };
-
-  const renderTriggerSummary = (rule) => {
-    if (rule.trigger_type === 'keyword') {
-      return (
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-gray-900">{humanizeTrigger(rule.trigger_type)}</p>
-          <div className="flex flex-wrap gap-2">
-            {(rule.keywords || []).map((keyword) => (
-              <span
-                key={keyword}
-                className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold text-gray-600"
-              >
-                {keyword}
-              </span>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (rule.trigger_type === 'away') {
-      return (
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-gray-900">Away reply</p>
-          <p className="text-xs text-gray-500">
-            Active outside {rule.business_hours?.start_time || '09:00'} - {rule.business_hours?.end_time || '18:00'} ({rule.business_hours?.timezone || 'Asia/Kolkata'})
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-1">
-        <p className="text-sm font-semibold text-gray-900">{humanizeTrigger(rule.trigger_type)}</p>
-        <p className="text-xs text-gray-500">
-          {rule.trigger_type === 'welcome'
-            ? 'Fires only on the first inbound message from a contact.'
-            : 'Runs only when no other active rule matches this inbound message.'}
-        </p>
-      </div>
-    );
-  };
   return (
-    <>
-      <div className="mx-auto max-w-7xl p-6 sm:p-8">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-gray-900">Auto Responses</h1>
-            <p className="mt-0.5 text-sm text-gray-500">
-              Portal-managed rules that trigger from Meta webhooks and send replies back through the Meta WhatsApp API.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={fetchPage}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600"
-            >
-              <Plus className="h-4 w-4" />
-              New Rule
-            </button>
-          </div>
-        </div>
+    <div className="space-y-6">
 
-        <div className="mb-6 grid gap-4 md:grid-cols-4">
-          {[
-            { label: 'Total Rules', value: summary?.total_rules || 0, color: 'text-gray-900' },
-            { label: 'Active Rules', value: summary?.active_rules || 0, color: 'text-emerald-700' },
-            { label: 'Sent Recently', value: summary?.sent_count || 0, color: 'text-sky-700' },
-            { label: 'Failed Recently', value: summary?.failed_count || 0, color: 'text-red-700' },
-          ].map((card) => (
-            <div key={card.label} className="rounded-[28px] border border-gray-100 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">{card.label}</p>
-              <p className={`mt-2 text-3xl font-semibold ${card.color}`}>{card.value}</p>
+      {/* ── Header (matches Dashboard) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <h1 className="text-[22px] font-extrabold text-surface-900 tracking-tight">Auto Responses</h1>
+          <p className="text-[13px] text-surface-400 mt-1 flex items-center gap-1.5">
+            <Bot className="w-3.5 h-3.5" />
+            Automated reply rules from Meta webhook events
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fetchPage(logsPage, true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-surface-200 bg-white text-[13px] font-semibold text-surface-600 hover:bg-surface-50 hover:border-surface-300 transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            onClick={() => navigate('/portal/auto-responses/new')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold rounded-lg transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Rule
+          </button>
+        </div>
+      </div>
+
+      {/* ── Date Triggers CTA ── */}
+      <div
+        onClick={() => navigate('/portal/date-triggers')}
+        className="flex items-center justify-between p-3 rounded-xl border border-blue-100 bg-blue-50/50 cursor-pointer hover:bg-blue-50 transition-colors"
+      >
+        <div className="flex items-center gap-2.5">
+          <Timer className="w-4 h-4 text-blue-600" />
+          <span className="text-xs font-semibold text-blue-800">Date-Based Triggers</span>
+          <span className="text-xs text-blue-600">— Auto-send templates on birthdays, anniversaries & custom dates</span>
+        </div>
+        <ChevronRight className="w-4 h-4 text-blue-400" />
+      </div>
+
+      {/* ── KPI Strip (matches Dashboard) ── */}
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => <Skel key={i} />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {kpis.map((k, idx) => (
+            <div
+              key={k.label}
+              className={`bg-white rounded-xl border ${k.border} p-4 hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-fade-in-up group`}
+              style={{ animationDelay: `${idx * 60}ms` }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-9 h-9 rounded-lg ${k.bg} flex items-center justify-center`}>
+                  <k.icon className={`w-[18px] h-[18px] ${k.color}`} />
+                </div>
+              </div>
+              <p className="text-[22px] font-extrabold text-surface-900 tracking-tight leading-none">{k.value}</p>
+              <p className="text-[11px] text-surface-400 mt-1.5 font-medium">{k.label}</p>
+              <p className="text-[10px] text-surface-300 mt-0.5">{k.sub}</p>
             </div>
           ))}
         </div>
+      )}
 
-        <div className="mb-8 rounded-[28px] border border-emerald-100 bg-emerald-50 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-white">
-              <Bot className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-emerald-900">Meta-compatible architecture</p>
-              <p className="mt-1 text-sm text-emerald-700">
-                Incoming customer messages arrive from Meta webhooks, this module matches your rules inside our platform,
-                and replies are sent back through the official Meta WhatsApp sending APIs.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-[1.55fr_1fr]">
-          <section className="rounded-[28px] border border-gray-100 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Rule Library</h2>
-                <p className="text-sm text-gray-500">Every rule below runs from live Meta webhook activity for this tenant.</p>
-              </div>
-              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
-                {rules.length} configured
-              </span>
-            </div>
-
-            {loading ? (
-              <div className="space-y-4 p-6">
-                {[1, 2, 3].map((item) => (
-                  <div key={item} className="h-28 animate-pulse rounded-3xl bg-gray-100" />
-                ))}
-              </div>
-            ) : rules.length === 0 ? (
-              <div className="px-6 py-16 text-center">
-                <Bot className="mx-auto h-12 w-12 text-gray-200" />
-                <p className="mt-4 text-base font-semibold text-gray-800">No auto-response rules yet</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  Start with a welcome reply, keyword bot, or after-hours rule.
-                </p>
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600"
-                >
-                  <Plus className="h-4 w-4" />
-                  Create your first rule
-                </button>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100">
-                {rules.map((rule) => (
-                  <div key={rule._id} className="px-6 py-5">
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="grid flex-1 gap-5 md:grid-cols-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-base font-semibold text-gray-900">{rule.name}</h3>
-                            <span
-                              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                                rule.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
-                              }`}
-                            >
-                              {rule.active ? 'Active' : 'Paused'}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                              Priority {rule.priority}
-                            </span>
-                          </div>
-                          {rule.description ? (
-                            <p className="mt-2 text-sm text-gray-500">{rule.description}</p>
-                          ) : (
-                            <p className="mt-2 text-sm text-gray-400">No internal description added.</p>
-                          )}
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {rule.send_once_per_contact ? (
-                              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-                                Once per contact
-                              </span>
-                            ) : null}
-                            {rule.cooldown_minutes ? (
-                              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                                Cooldown {rule.cooldown_minutes} min
-                              </span>
-                            ) : null}
-                            {!rule.stop_after_match ? (
-                              <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
-                                Allows next rules
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                              Trigger
-                            </p>
-                            {renderTriggerSummary(rule)}
-                          </div>
-                          <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                              Reply
-                            </p>
-                            {renderResponseSummary(rule)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 xl:w-[220px] xl:justify-end">
-                        <button
-                          type="button"
-                          onClick={() => toggleActive(rule)}
-                          className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium ${
-                            rule.active
-                              ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
-                              : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          }`}
-                        >
-                          {rule.active ? 'Pause' : 'Activate'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEdit(rule)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteRule(rule)}
-                          className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-100"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-[28px] border border-gray-100 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Execution History</h2>
-                <p className="text-sm text-gray-500">Latest webhook-triggered runs across all rules.</p>
-              </div>
-              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
-                {logs.length} recent
-              </span>
-            </div>
-
-            {loading ? (
-              <div className="space-y-4 p-6">
-                {[1, 2, 3, 4].map((item) => (
-                  <div key={item} className="h-20 animate-pulse rounded-3xl bg-gray-100" />
-                ))}
-              </div>
-            ) : logs.length === 0 ? (
-              <div className="px-6 py-16 text-center">
-                <Clock3 className="mx-auto h-12 w-12 text-gray-200" />
-                <p className="mt-4 text-base font-semibold text-gray-800">No rule activity yet</p>
-                <p className="mt-1 text-sm text-gray-500">
-                  As soon as Meta webhooks arrive and a rule fires, the audit trail will appear here.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3 p-4">
-                {logs.map((log) => {
-                  const style = STATUS_STYLES[log.status] || STATUS_STYLES.skipped;
-                  const StatusIcon = style.icon;
-                  return (
-                    <div key={log._id} className="rounded-3xl border border-gray-100 bg-gray-50 p-4">
-                      <div className="flex items-start gap-3">
-                        <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${style.bg} ${style.text}`}>
-                          <StatusIcon className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-sm font-semibold text-gray-900">{log.rule_name}</p>
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${style.bg} ${style.text}`}>
-                              {log.status}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {log.contact_name || log.contact_phone || 'Unknown contact'}
-                            {log.contact_phone ? ` • ${log.contact_phone}` : ''}
-                          </p>
-                          {log.reason ? <p className="mt-2 text-sm text-gray-600">{log.reason}</p> : null}
-                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-400">
-                            <span>{humanizeTrigger(log.trigger_type)}</span>
-                            <span>•</span>
-                            <span>{log.response_type === 'template' ? 'Meta template' : 'Text reply'}</span>
-                            <span>•</span>
-                            <span>{new Date(log.created_at).toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+      {/* ── Filter Row: Tabs ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 animate-fade-in-up">
+        <div className="flex items-center bg-surface-100 rounded-lg p-0.5">
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`px-3 py-[6px] rounded-md text-[12px] font-semibold transition-all ${
+              activeTab === 'rules' ? 'bg-white text-surface-900 shadow-sm' : 'text-surface-500 hover:text-surface-700'
+            }`}
+          >
+            Rules ({rules.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={`px-3 py-[6px] rounded-md text-[12px] font-semibold transition-all ${
+              activeTab === 'activity' ? 'bg-white text-surface-900 shadow-sm' : 'text-surface-500 hover:text-surface-700'
+            }`}
+          >
+            Activity ({logsPagination.total})
+          </button>
         </div>
       </div>
-      <PortalModal
-        open={showModal}
-        onClose={() => !saving && setShowModal(false)}
-        title={editingRule ? 'Edit Auto Response' : 'Create Auto Response'}
-        subtitle="Rules execute inside our platform from live Meta webhooks, then reply through Meta WhatsApp APIs."
-        size="xl"
-      >
-        <div className="space-y-8">
-          <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-            <div className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    Rule name
-                  </label>
-                  <input
-                    value={form.name}
-                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="After hours fallback"
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    Internal description
-                  </label>
-                  <textarea
-                    value={form.description}
-                    onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                    placeholder="Explain when this should fire so your team knows why it exists."
-                    rows={3}
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    Priority
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={form.priority}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, priority: Number.parseInt(event.target.value, 10) || 1 }))
-                    }
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    Cooldown (minutes)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.cooldown_minutes}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        cooldown_minutes: Number.parseInt(event.target.value, 10) || 0,
-                      }))
-                    }
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                  />
-                </div>
-              </div>
 
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                  Trigger type
-                </label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {TRIGGER_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setForm((current) => ({ ...current, trigger_type: option.value }))}
-                      className={`rounded-3xl border p-4 text-left transition ${
-                        form.trigger_type === option.value
-                          ? 'border-emerald-300 bg-emerald-50 shadow-sm'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
-                    >
-                      <p className="text-sm font-semibold text-gray-900">{option.label}</p>
-                      <p className="mt-1 text-xs leading-5 text-gray-500">{option.hint}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {form.trigger_type === 'keyword' ? (
-                <div className="grid gap-4 sm:grid-cols-[220px_1fr]">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                      Match rule
-                    </label>
-                    <select
-                      value={form.keyword_match_type}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, keyword_match_type: event.target.value }))
-                      }
-                      className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                    >
-                      {MATCH_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                      Keywords
-                    </label>
-                    <textarea
-                      value={form.keywords_text}
-                      onChange={(event) => setForm((current) => ({ ...current, keywords_text: event.target.value }))}
-                      placeholder={'pricing\nprice\nplan'}
-                      rows={5}
-                      className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                    />
-                    <p className="mt-1 text-xs text-gray-400">One keyword per line.</p>
-                  </div>
-                </div>
-              ) : null}
-
-              {form.trigger_type === 'away' ? (
-                <div className="rounded-[28px] border border-gray-200 bg-gray-50 p-5">
-                  <div className="grid gap-4 lg:grid-cols-[1fr_180px_180px]">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Timezone
-                      </label>
-                      <input
-                        value={form.business_hours.timezone}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            business_hours: { ...current.business_hours, timezone: event.target.value },
-                          }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Start
-                      </label>
-                      <input
-                        type="time"
-                        value={form.business_hours.start_time}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            business_hours: { ...current.business_hours, start_time: event.target.value },
-                          }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        End
-                      </label>
-                      <input
-                        type="time"
-                        value={form.business_hours.end_time}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            business_hours: { ...current.business_hours, end_time: event.target.value },
-                          }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                      Active business days
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {WEEK_DAYS.map((day) => {
-                        const active = form.business_hours.days.includes(day.value);
-                        return (
-                          <button
-                            key={day.value}
-                            type="button"
-                            onClick={() => toggleBusinessDay(day.value)}
-                            className={`rounded-full px-3 py-2 text-sm font-medium transition ${
-                              active
-                                ? 'bg-emerald-500 text-white shadow-sm'
-                                : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-100'
-                            }`}
-                          >
-                            {day.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="space-y-5">
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                  Response type
-                </label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {RESPONSE_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setForm((current) => ({ ...current, response_type: option.value }))}
-                      className={`rounded-3xl border p-4 text-left transition ${
-                        form.response_type === option.value
-                          ? 'border-emerald-300 bg-emerald-50 shadow-sm'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
-                    >
-                      <p className="text-sm font-semibold text-gray-900">{option.label}</p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {option.value === 'text'
-                          ? 'Send a dynamic text reply directly through Meta.'
-                          : 'Send an approved Meta template with variable mapping.'}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {form.response_type === 'text' ? (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                    Reply text
-                  </label>
-                  <textarea
-                    value={form.text_body}
-                    onChange={(event) => setForm((current) => ({ ...current, text_body: event.target.value }))}
-                    rows={10}
-                    placeholder="Hi {{contact_name}}, thanks for your message."
-                    className="w-full rounded-[28px] border border-gray-200 bg-gray-50 px-4 py-4 text-sm leading-6 text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                  />
-                  <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-700">
-                    Available variables: <span className="font-semibold">{'{{contact_name}}'}</span>,{' '}<span className="font-semibold">{'{{contact_phone}}'}</span>,{' '}<span className="font-semibold">{'{{contact_email}}'}</span>,{' '}<span className="font-semibold">{'{{incoming_text}}'}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4 rounded-[28px] border border-gray-200 bg-gray-50 p-5">
-                  <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Approved Meta template
-                      </label>
-                      <select
-                        value={form.template_name}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            template_name: event.target.value,
-                            template_language:
-                              approvedTemplates.find((template) => template.name === event.target.value)?.language || 'en',
-                          }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      >
-                        <option value="">{loadingTemplates ? 'Loading templates...' : 'Select approved template'}</option>
-                        {approvedTemplates.map((template) => (
-                          <option key={`${template.name}-${template.language}`} value={template.name}>
-                            {template.name} ({template.language})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Language
-                      </label>
-                      <input
-                        value={form.template_language}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, template_language: event.target.value || 'en' }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Header media
-                      </label>
-                      <select
-                        value={form.template_header_type}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, template_header_type: event.target.value }))
-                        }
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400"
-                      >
-                        <option value="none">None</option>
-                        <option value="image">Image</option>
-                        <option value="video">Video</option>
-                        <option value="document">Document</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-                        Header media URL
-                      </label>
-                      <input
-                        value={form.template_header_media_url}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, template_header_media_url: event.target.value }))
-                        }
-                        disabled={form.template_header_type === 'none'}
-                        placeholder="https://public-url-to-media-file"
-                        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 disabled:cursor-not-allowed disabled:bg-gray-100"
-                      />
-                      {form.template_header_type !== 'none' ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowTemplateHeaderLibrary(true)}
-                          className="mt-2 inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                        >
-                          <FolderOpen className="h-3.5 w-3.5" />
-                          Choose from gallery
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowTemplateVars((current) => !current)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-left"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Template variable mapping</p>
-                      <p className="text-xs text-gray-500">
-                        Map approved Meta template variables to contact or inbound-message data.
-                      </p>
-                    </div>
-                    {showTemplateVars ? <ChevronUp className="h-4 w-4 text-gray-500" /> : <ChevronDown className="h-4 w-4 text-gray-500" />}
-                  </button>
-
-                  {showTemplateVars ? (
-                    <div className="space-y-3">
-                      {!form.template_name ? (
-                        <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-4 py-8 text-center text-sm text-gray-500">
-                          Select an approved Meta template first to map variables.
-                        </div>
-                      ) : templateVariableKeys.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-4 py-8 text-center text-sm text-gray-500">
-                          This template has no variable placeholders.
-                        </div>
-                      ) : (
-                        templateVariableKeys.map((key) => {
-                          const value = form.template_variables[key] || { source: 'static', value: '' };
-                          return (
-                            <div key={key} className="rounded-3xl border border-gray-200 bg-white p-4">
-                              <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-                                <div>
-                                  <p className="text-sm font-semibold text-gray-900">Variable {key}</p>
-                                  <p className="mt-1 text-xs text-gray-500">
-                                    Choose whether this comes from the contact profile or a static value.
-                                  </p>
-                                </div>
-                                <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
-                                  <select
-                                    value={value.source}
-                                    onChange={(event) =>
-                                      setForm((current) => ({
-                                        ...current,
-                                        template_variables: {
-                                          ...current.template_variables,
-                                          [key]: {
-                                            ...current.template_variables[key],
-                                            source: event.target.value,
-                                          },
-                                        },
-                                      }))
-                                    }
-                                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white"
-                                  >
-                                    <option value="static">Static value</option>
-                                    <option value="contact_name">Contact name</option>
-                                    <option value="contact_phone">Contact phone</option>
-                                    <option value="contact_email">Contact email</option>
-                                    <option value="incoming_text">Incoming message text</option>
-                                  </select>
-                                  <input
-                                    value={value.value || ''}
-                                    onChange={(event) =>
-                                      setForm((current) => ({
-                                        ...current,
-                                        template_variables: {
-                                          ...current.template_variables,
-                                          [key]: {
-                                            ...current.template_variables[key],
-                                            value: event.target.value,
-                                          },
-                                        },
-                                      }))
-                                    }
-                                    disabled={value.source !== 'static'}
-                                    placeholder={value.source === 'static' ? 'Enter a fallback static value' : 'Auto-filled from runtime data'}
-                                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-400 focus:bg-white disabled:cursor-not-allowed disabled:bg-gray-100"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              <div className="rounded-[28px] border border-gray-200 bg-white p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Execution controls</p>
-                <div className="mt-4 space-y-3">
-                  {[
-                    {
-                      key: 'active',
-                      title: 'Rule is active',
-                      subtitle: 'Inactive rules stay saved but will not execute from inbound Meta webhooks.',
-                    },
-                    {
-                      key: 'send_once_per_contact',
-                      title: 'Send once per contact',
-                      subtitle: 'Prevent repeat replies for the same customer on future inbound messages.',
-                    },
-                    {
-                      key: 'stop_after_match',
-                      title: 'Stop after this rule matches',
-                      subtitle: 'If disabled, later rules can still run after this one matches.',
-                    },
-                  ].map((item) => (
-                    <label
-                      key={item.key}
-                      className="flex cursor-pointer items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(form[item.key])}
-                        onChange={(event) =>
-                          setForm((current) => ({ ...current, [item.key]: event.target.checked }))
-                        }
-                        className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-500"
-                      />
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">{item.title}</p>
-                        <p className="text-xs text-gray-500">{item.subtitle}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <div className="flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white">
-                <Info className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">How this stays Meta-compatible</p>
-                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-                  The rule logic lives in our portal, but the actual customer reply is still sent through the official
-                  Meta WhatsApp API using your connected WABA and phone number. That means delivery, template approval,
-                  and webhook receipts stay aligned with Meta.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveRule}
-                disabled={saving}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? (
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
-                ) : editingRule ? (
-                  <Save className="h-4 w-4" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                {editingRule ? 'Save Rule' : 'Create Rule'}
-              </button>
+      {/* ═══ RULES TAB ═══ */}
+      {activeTab === 'rules' && (
+        <div className="bg-white rounded-xl border border-surface-200 animate-fade-in-up overflow-hidden" style={{ animationDelay: '100ms' }}>
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-100">
+            <div className="flex items-center gap-3">
+              <h3 className="text-[14px] font-bold text-surface-900">All Rules</h3>
+              <span className="text-[11px] font-bold text-surface-400 bg-surface-100 px-2 py-0.5 rounded-full">
+                {rules.length}
+              </span>
             </div>
           </div>
+
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {[1, 2, 3, 4].map((i) => <div key={i} className="h-12 bg-surface-50 rounded-lg animate-pulse" />)}
+            </div>
+          ) : rules.length === 0 ? (
+            <div className="py-12 text-center">
+              <Bot className="w-8 h-8 text-surface-300 mx-auto mb-2" />
+              <p className="text-[13px] text-surface-500 font-medium">No auto-response rules yet</p>
+              <p className="text-[11px] text-surface-400 mt-1">Set up keyword bots, welcome messages, and after-hours replies</p>
+              <button
+                onClick={() => navigate('/portal/auto-responses/new')}
+                className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold rounded-lg transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Create First Rule
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-surface-100 bg-surface-50/60">
+                    <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Rule</th>
+                    <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Trigger</th>
+                    <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Response</th>
+                    <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Status</th>
+                    <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Options</th>
+                    <th className="px-5 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-surface-400">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-100">
+                  {rules.map((rule) => {
+                    const tm = TRIGGER_MAP[rule.trigger_type] || TRIGGER_MAP.keyword;
+
+                    return (
+                      <tr key={rule._id} className="hover:bg-surface-50/60 transition-colors">
+                        {/* Rule name + description + keywords */}
+                        <td className="px-5 py-3">
+                          <p className="text-[13px] font-semibold text-surface-900 truncate max-w-[200px]">{rule.name}</p>
+                          {rule.description && (
+                            <p className="text-[11px] text-surface-400 truncate max-w-[200px] mt-0.5">{rule.description}</p>
+                          )}
+                          {rule.trigger_type === 'keyword' && rule.keywords?.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {rule.keywords.slice(0, 4).map((kw) => (
+                                <span key={kw} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[9px] rounded font-semibold border border-blue-100">
+                                  {kw}
+                                </span>
+                              ))}
+                              {rule.keywords.length > 4 && (
+                                <span className="px-1.5 py-0.5 bg-surface-50 text-surface-400 text-[9px] rounded font-semibold">
+                                  +{rule.keywords.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        {/* Trigger type */}
+                        <td className="px-5 py-3">
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${tm.cls}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${tm.dot}`} />
+                            {tm.label}
+                          </span>
+                        </td>
+                        {/* Response type */}
+                        <td className="px-5 py-3">
+                          <span className="text-[12px] text-surface-600 font-medium">
+                            {rule.response_type === 'template' ? 'Meta Template' : 'Text Reply'}
+                          </span>
+                          {rule.response_type === 'template' && rule.template_name && (
+                            <p className="text-[10px] text-surface-400 mt-0.5 truncate max-w-[120px]">{rule.template_name}</p>
+                          )}
+                        </td>
+                        {/* Active status */}
+                        <td className="px-5 py-3">
+                          <button
+                            onClick={() => toggleActive(rule)}
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer transition-colors ${
+                              rule.active
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-surface-100 text-surface-600 border-surface-200 hover:bg-surface-200'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? 'bg-emerald-500' : 'bg-surface-400'}`} />
+                            {rule.active ? 'Active' : 'Paused'}
+                          </button>
+                        </td>
+                        {/* Options: priority, cooldown, once */}
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 bg-surface-50 text-surface-500 rounded text-[10px] font-semibold border border-surface-200 flex items-center gap-0.5">
+                              <Hash className="w-2.5 h-2.5" />{rule.priority}
+                            </span>
+                            {rule.send_once_per_contact && (
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-semibold border border-blue-100 flex items-center gap-0.5">
+                                <Users className="w-2.5 h-2.5" />Once
+                              </span>
+                            )}
+                            {rule.cooldown_minutes > 0 && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded text-[10px] font-semibold border border-amber-100 flex items-center gap-0.5">
+                                <Timer className="w-2.5 h-2.5" />{rule.cooldown_minutes}m
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        {/* Actions */}
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => toggleActive(rule)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                rule.active
+                                  ? 'text-surface-400 hover:bg-amber-50 hover:text-amber-600'
+                                  : 'text-surface-400 hover:bg-emerald-50 hover:text-emerald-600'
+                              }`}
+                              title={rule.active ? 'Pause' : 'Activate'}
+                            >
+                              {rule.active ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                            </button>
+                            <button
+                              onClick={() => navigate(`/portal/auto-responses/${rule._id}/edit`)}
+                              className="p-2 rounded-lg text-surface-400 hover:bg-violet-50 hover:text-violet-600 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => deleteRule(rule)}
+                              className="p-2 rounded-lg text-surface-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </PortalModal>
-      <MediaLibraryModal
-        open={showTemplateHeaderLibrary}
-        onClose={() => setShowTemplateHeaderLibrary(false)}
-        title="Select Header Media"
-        subtitle="Pick a file for auto-response template header."
-        allowedTypes={form.template_header_type !== 'none' ? [form.template_header_type] : ['document']}
-        onSelect={(assets) => {
-          const first = assets?.[0];
-          if (!first?.public_url) {
-            toast.error('No valid media selected');
-            return;
-          }
-          setForm((current) => ({ ...current, template_header_media_url: first.public_url }));
-          setShowTemplateHeaderLibrary(false);
-          toast.success('Header media selected');
-        }}
-      />
-    </>
+      )}
+
+      {/* ═══ ACTIVITY TAB ═══ */}
+      {activeTab === 'activity' && (
+        <div className="bg-white rounded-xl border border-surface-200 animate-fade-in-up overflow-hidden" style={{ animationDelay: '100ms' }}>
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-surface-100">
+            <div className="flex items-center gap-3">
+              <h3 className="text-[14px] font-bold text-surface-900">Activity Log</h3>
+              <span className="text-[11px] font-bold text-surface-400 bg-surface-100 px-2 py-0.5 rounded-full">
+                {logsPagination.total}
+              </span>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-5 space-y-3">
+              {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-12 bg-surface-50 rounded-lg animate-pulse" />)}
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="py-12 text-center">
+              <Clock3 className="w-8 h-8 text-surface-300 mx-auto mb-2" />
+              <p className="text-[13px] text-surface-500 font-medium">No activity yet</p>
+              <p className="text-[11px] text-surface-400 mt-1">When rules fire from Meta webhooks, the audit trail will appear here</p>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-surface-100 bg-surface-50/60">
+                      <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Status</th>
+                      <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Rule</th>
+                      <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Contact</th>
+                      <th className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-surface-400">Reason</th>
+                      <th className="px-5 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-surface-400">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-100">
+                    {logs.map((log) => {
+                      const lm = LOG_STATUS_MAP[log.status] || LOG_STATUS_MAP.sent;
+                      return (
+                        <tr key={log._id} className="hover:bg-surface-50/60 transition-colors">
+                          <td className="px-5 py-3">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${lm.cls}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${lm.dot}`} />
+                              {lm.label}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            <p className="text-[13px] font-semibold text-surface-900">{log.rule_name}</p>
+                          </td>
+                          <td className="px-5 py-3">
+                            <p className="text-[12px] text-surface-600">
+                              {log.contact_name || log.contact_phone || 'Unknown'}
+                            </p>
+                          </td>
+                          <td className="px-5 py-3">
+                            <p className="text-[11px] text-surface-400 truncate max-w-[200px]">{log.reason || '—'}</p>
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            <p className="text-[12px] text-surface-500">
+                              {log.created_at ? new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                            </p>
+                            <p className="text-[10px] text-surface-400">
+                              {log.created_at ? new Date(log.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </p>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {logsPagination.pages > 1 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t border-surface-100">
+                  <span className="text-[11px] text-surface-400">
+                    Page {logsPagination.page} of {logsPagination.pages} ({logsPagination.total} total)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      disabled={logsPagination.page <= 1}
+                      onClick={() => setLogsPage(logsPagination.page - 1)}
+                      className="p-1.5 rounded-lg border border-surface-200 hover:bg-surface-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-surface-500" />
+                    </button>
+                    {logPageNumbers.map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => setLogsPage(page)}
+                        className={`min-w-[2rem] px-2 py-1.5 rounded-lg text-[11px] font-bold transition ${
+                          page === logsPagination.page
+                            ? 'bg-brand-600 text-white'
+                            : 'border border-surface-200 text-surface-600 hover:bg-surface-50'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      disabled={logsPagination.page >= logsPagination.pages}
+                      onClick={() => setLogsPage(logsPagination.page + 1)}
+                      className="p-1.5 rounded-lg border border-surface-200 hover:bg-surface-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <ChevronRight className="w-4 h-4 text-surface-500" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
-
